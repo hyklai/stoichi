@@ -1,9 +1,5 @@
-// This file connects to YOUR Firebase project ("stoichi").
-// teacher.html, student.html, and display.html all import this same file,
-// so they all end up talking to the same shared database and the same
-// authentication instance.
-// You should not need to edit this file again unless you create a new
-// Firebase project from scratch.
+// Connects to the "stoichi" Firebase project. All pages import db/auth
+// from here. Only edit this if you create a new Firebase project.
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js';
 import { getDatabase } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
@@ -20,9 +16,5 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-
-// Other files import "db" from here to reach the shared database, and
-// "auth" to sign in (anonymously for students/display, with a real
-// email+password for the teacher panel).
 export const db = getDatabase(app);
 export const auth = getAuth(app);

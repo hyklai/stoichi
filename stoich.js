@@ -1,18 +1,8 @@
-// Given a reaction and the amounts of each reactant a student has chosen
-// to COMMIT to this run, work out:
-//  - which reactant is limiting (undefined/meaningless for a 1-reactant
-//    decomposition -- callers should treat it as trivial in that case)
-//  - extent: how many times the equation as written actually occurred
-//  - formed: moles of EACH product formed (a map, since a reaction can
-//    have 1 or 2 products now)
-//  - consumed: moles of EACH reactant actually consumed (a map)
-//
-// Left at full precision on purpose -- no rounding. Display code handles
-// formatting to 2 decimals with .toFixed(2).
-//
-// Whatever was committed but not consumed is waste -- the caller is
-// responsible for subtracting the full committed amount from inventory
-// and tracking committed-minus-consumed as wasted.
+// Given a reaction and committed reactant amounts: returns the limiting
+// reactant, extent (times the equation occurred), moles formed, and
+// moles consumed. Left unrounded on purpose -- rounding here previously
+// caused a float-precision bug. Display code formats with .toFixed(2);
+// caller handles inventory/waste bookkeeping, this file is just the math.
 
 export function solveReaction(reaction, committed) {
   let limitingLetter = null;
