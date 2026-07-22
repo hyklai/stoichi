@@ -151,6 +151,7 @@
     <div id="confirmScreen" class="panel" style="display:none;">
       <div class="panel-label">Confirm reaction</div>
       <div class="hint" id="confirmReactionLabel" style="margin-bottom:10px;"></div>
+      <div class="hint" id="confirmYieldLabel" style="display:none; margin-bottom:10px; color:#f4b942; font-weight:600;"></div>
       <div id="commitInputs"></div>
       <div class="error-msg" id="commitError"></div>
       <div class="bonus-box" id="bonusBox">
@@ -169,6 +170,7 @@
     import { REACTIONS, PRICES, equationString } from './reactions.js';
     import { solveReaction } from './stoich.js';
     import { HIDDEN_GOALS, COMMON_GOALS, COMMON_GOAL_SPECIES } from './goals.js';
+    import { decayedPressure, yieldFromPressure, RUN_PRESSURE_INCREMENT } from './market.js';
 
     // Tunable constants -- edit here.
     const STARTING_HEAT = 2000;
@@ -233,6 +235,8 @@
     let sessionId = null;
     let hasSeenSessionId = false;
     let bonusEnabled = true;
+    let yieldFluctuationEnabled = false;
+    let pendingPercentYield = 100;
     let myQuestClassRecord = null;
     let myQuestRecordListenerSet = false;
     let offeredQuests = [];
@@ -275,6 +279,7 @@
       });
       onValue(ref(db, 'library'), (s) => { library = s.val() || {}; renderMain(); });
       onValue(ref(db, 'settings/bonusEnabled'), (s) => { bonusEnabled = s.val() !== false; });
+      onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; });
       onValue(ref(db, 'settings/paused'), (s) => { paused = s.val() === true; renderMain(); });
       onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
         currentHeat = s.val() ?? STARTING_HEAT;
@@ -519,16 +524,31 @@
       await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
     }
 
-    function openConfirmScreen(reactionId) {
+    async function openConfirmScreen(reactionId) {
       pendingReactionId = reactionId;
       const reaction = REACTIONS.find((r) => r.id === reactionId);
       pendingQuestionType = bonusEnabled ? pickBonusQuestionType(reaction) : null;
+
+      if (yieldFluctuationEnabled) {
+        const snap = await get(ref(db, 'marketPressure/' + reactionId));
+        pendingPercentYield = yieldFromPressure(decayedPressure(snap.val(), Date.now()));
+      } else {
+        pendingPercentYield = 100;
+      }
+
       updateTopLevelScreen();
       renderConfirmScreen(reaction);
     }
 
     function renderConfirmScreen(reaction) {
       document.getElementById('confirmReactionLabel').textContent = reaction.name + ' (' + reaction.type + '): ' + equationString(reaction);
+      const yieldEl = document.getElementById('confirmYieldLabel');
+      if (yieldFluctuationEnabled) {
+        yieldEl.style.display = 'block';
+        yieldEl.textContent = 'Current yield for this reaction: ' + pendingPercentYield.toFixed(1) + '% (fixed for this attempt)';
+      } else {
+        yieldEl.style.display = 'none';
+      }
       document.getElementById('commitError').textContent = '';
       document.getElementById('commitInputs').innerHTML = reaction.reactants.map((r) => {
         const have = inventory[r.letter] || 0;
@@ -596,7 +616,7 @@
         return;
       }
 
-      const result = solveReaction(reaction, committed);
+      const result = solveReaction(reaction, committed, pendingPercentYield);
       const heatEarned = result.extent * reaction.heatPerExtent;
 
       const newInventory = Object.assign({}, inventory);
@@ -652,6 +672,13 @@
         recordUpdates.push(bumpSingleRecord('bonusMaster', newBonusCorrectCount));
       }
       await Promise.all(recordUpdates);
+
+      if (yieldFluctuationEnabled) {
+        const pressureRef = ref(db, 'marketPressure/' + reaction.id);
+        const snap = await get(pressureRef);
+        const freshPressure = decayedPressure(snap.val(), Date.now());
+        await set(pressureRef, { pressure: freshPressure + RUN_PRESSURE_INCREMENT, lastUpdate: Date.now() });
+      }
 
       closeConfirmScreen();
     });

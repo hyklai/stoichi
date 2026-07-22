@@ -160,6 +160,15 @@
     </div>
 
     <div class="section">
+      <div class="section-label">Fluctuating yield</div>
+      <label class="toggle-row">
+        <input type="checkbox" id="yieldToggle">
+        <span>Percent yield responds to supply and demand</span>
+      </label>
+      <div class="toggle-note">Off: every reaction always yields 100%. On: each reaction starts at 90%, drops the more it's run recently, and recovers (up to 100%) the longer it's left alone.</div>
+    </div>
+
+    <div class="section">
       <div class="section-label">Gift to all students</div>
       <div class="gift-row">
         <select id="giftType"><option value="heat">Heat</option></select>
@@ -248,6 +257,7 @@
     const studentsRef = ref(db, 'students');
     const classRecordsRef = ref(db, 'classRecords');
     const bonusEnabledRef = ref(db, 'settings/bonusEnabled');
+    const yieldFluctuationRef = ref(db, 'settings/yieldFluctuationEnabled');
     const pausedRef = ref(db, 'settings/paused');
     let connected = false;
     let studentsData = {};
@@ -317,6 +327,13 @@
     });
     document.getElementById('bonusToggle').addEventListener('change', (e) => {
       set(bonusEnabledRef, e.target.checked);
+    });
+
+    onValue(yieldFluctuationRef, (snapshot) => {
+      document.getElementById('yieldToggle').checked = snapshot.val() === true;
+    });
+    document.getElementById('yieldToggle').addEventListener('change', (e) => {
+      set(yieldFluctuationRef, e.target.checked);
     });
 
     let isPaused = false;
@@ -493,6 +510,7 @@
       await set(classRecordsRef, null);
       await set(pausedRef, false);
       await set(ref(db, 'sessionId'), Date.now());
+      await set(ref(db, 'marketPressure'), null);
     });
     } // end initTeacherPanel
   </script>
