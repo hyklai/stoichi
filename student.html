@@ -46,6 +46,10 @@
   .library-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2e35; gap: 12px; }
   .library-row:last-child { border-bottom: none; }
   .library-missing { font-size: 11px; color: #9ba0a8; margin-top: 2px; }
+  .library-yield { font-size: 11px; font-weight: 600; margin-top: 2px; }
+  .yield-good { color: #5fbf8f; }
+  .yield-mid { color: #f4b942; }
+  .yield-low { color: #d9463c; }
   .inventory-row { display: flex; justify-content: space-between; padding: 6px 0; font-family: ui-monospace, monospace; font-size: 14px; }
   .trade-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #2a2e35; }
   .trade-row:last-child { border-bottom: none; }
@@ -105,7 +109,7 @@
     <div class="status" id="status">Connecting to database...</div>
     <div class="welcome" id="welcome"></div>
     <div class="row">
-      <div><div class="stat-label">Round</div><div class="stat-number round-number" id="roundNumber">—</div></div>
+      <div><div class="stat-label">Yield update</div><div class="stat-number round-number" id="marketCountdown">—</div></div>
       <div><div class="stat-label">Heat</div><div class="stat-number heat-number" id="heatNumber">—</div></div>
       <div><div class="stat-label">Wasted</div><div class="stat-number wasted-number" id="wastedNumber">—</div></div>
     </div>
@@ -165,12 +169,12 @@
 
   <script type="module">
     import { db, auth } from './firebase-config.js';
-    import { ref, onValue, get, set, update } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+    import { ref, onValue, get, set, update, increment, runTransaction } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
     import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
     import { REACTIONS, PRICES, equationString } from './reactions.js';
     import { solveReaction } from './stoich.js';
     import { HIDDEN_GOALS, COMMON_GOALS, COMMON_GOAL_SPECIES } from './goals.js';
-    import { decayedPressure, yieldFromPressure, RUN_PRESSURE_INCREMENT } from './market.js';
+    import { yieldFromPressure, computeBoundaryTransition, liveRemainingSeconds, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
 
     // Tunable constants -- edit here.
     const STARTING_HEAT = 2000;
@@ -236,6 +240,8 @@
     let hasSeenSessionId = false;
     let bonusEnabled = true;
     let yieldFluctuationEnabled = false;
+    let marketPressures = {};
+    let marketParams = { runPressureIncrement: DEFAULT_RUN_PRESSURE_INCREMENT, decayPerMinute: DEFAULT_PRESSURE_DECAY_PER_MINUTE, intervalMinutes: DEFAULT_INTERVAL_MINUTES, tierMultipliers: DEFAULT_TIER_MULTIPLIERS };
     let pendingPercentYield = 100;
     let myQuestClassRecord = null;
     let myQuestRecordListenerSet = false;
@@ -273,13 +279,46 @@
         sessionId = newId;
         hasSeenSessionId = true;
       });
-      onValue(ref(db, 'round'), (s) => {
-        document.getElementById('roundNumber').textContent = s.val() ?? 0;
+      let latestTimer = null;
+      onValue(ref(db, 'market/timer'), (s) => {
+        latestTimer = s.val();
         document.getElementById('status').textContent = 'Connected';
       });
       onValue(ref(db, 'library'), (s) => { library = s.val() || {}; renderMain(); });
+      onValue(ref(db, 'market/pressures'), (s) => { marketPressures = s.val() || {}; renderMain(); });
       onValue(ref(db, 'settings/bonusEnabled'), (s) => { bonusEnabled = s.val() !== false; });
-      onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; });
+      onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; renderCountdown(); renderMain(); });
+      onValue(ref(db, 'settings/marketParams'), (s) => {
+        const mp = s.val();
+        if (mp) marketParams = mp;
+      });
+
+      function formatCountdown(seconds) {
+        const sec = Math.max(0, Math.round(seconds));
+        return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      }
+      function renderCountdown() {
+        const el = document.getElementById('marketCountdown');
+        if (!yieldFluctuationEnabled) { el.textContent = 'Off'; return; }
+        if (!latestTimer) { el.textContent = '—'; return; }
+        el.textContent = (latestTimer.running ? '' : '⏸ ') + formatCountdown(liveRemainingSeconds(latestTimer, Date.now()));
+      }
+      setInterval(renderCountdown, 1000);
+
+      // Any open student page can also notice the interval is due and
+      // advance it -- safe even if other students' tabs (or the teacher's,
+      // or the display) attempt the exact same thing at the same moment.
+      const marketRef = ref(db, 'market');
+      setInterval(() => {
+        if (!yieldFluctuationEnabled || !latestTimer) return;
+        if (liveRemainingSeconds(latestTimer, Date.now()) > 0) return;
+        runTransaction(marketRef, (current) => {
+          if (!current || !current.timer || !current.timer.running) return current;
+          if (liveRemainingSeconds(current.timer, Date.now()) > 0) return current;
+          return computeBoundaryTransition(current, REACTIONS, marketParams, Date.now());
+        });
+      }, 1000);
+
       onValue(ref(db, 'settings/paused'), (s) => { paused = s.val() === true; renderMain(); });
       onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
         currentHeat = s.val() ?? STARTING_HEAT;
@@ -406,8 +445,15 @@
       const canRun = !paused && missing.length === 0;
       const missingText = (!paused && missing.length > 0) ?
         '<div class="library-missing">Need some ' + missing.map((re) => re.letter).join(', ') + '</div>' : '';
+      let yieldText = '';
+      if (yieldFluctuationEnabled) {
+        const stored = marketPressures[r.id];
+        const pct = yieldFromPressure((stored && stored.pressure) || 0);
+        const cls = pct >= 80 ? 'yield-good' : (pct >= 65 ? 'yield-mid' : 'yield-low');
+        yieldText = '<div class="library-yield ' + cls + '">Yield: ' + pct.toFixed(0) + '%</div>';
+      }
       return '<div class="library-row">' +
-        '<div><span class="type-tag">' + r.type + '</span><br><strong>' + r.name + '</strong><br><span class="equation-inline">' + equationString(r) + '</span>' + missingText + '</div>' +
+        '<div><span class="type-tag">' + r.type + '</span><br><strong>' + r.name + '</strong><br><span class="equation-inline">' + equationString(r) + '</span>' + yieldText + missingText + '</div>' +
         '<button data-id="' + r.id + '" class="run-btn" ' + (canRun ? '' : 'disabled') + '>Run</button>' +
         '</div>';
     }
@@ -530,8 +576,9 @@
       pendingQuestionType = bonusEnabled ? pickBonusQuestionType(reaction) : null;
 
       if (yieldFluctuationEnabled) {
-        const snap = await get(ref(db, 'marketPressure/' + reactionId));
-        pendingPercentYield = yieldFromPressure(decayedPressure(snap.val(), Date.now()));
+        const snap = await get(ref(db, 'market/pressures/' + reactionId));
+        const stored = snap.val();
+        pendingPercentYield = yieldFromPressure((stored && stored.pressure) || 0);
       } else {
         pendingPercentYield = 100;
       }
@@ -674,10 +721,7 @@
       await Promise.all(recordUpdates);
 
       if (yieldFluctuationEnabled) {
-        const pressureRef = ref(db, 'marketPressure/' + reaction.id);
-        const snap = await get(pressureRef);
-        const freshPressure = decayedPressure(snap.val(), Date.now());
-        await set(pressureRef, { pressure: freshPressure + RUN_PRESSURE_INCREMENT, lastUpdate: Date.now() });
+        await update(ref(db, 'market/pressures/' + reaction.id), { extentThisInterval: increment(result.extent) });
       }
 
       closeConfirmScreen();

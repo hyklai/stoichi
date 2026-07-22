@@ -60,7 +60,7 @@
   .board {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
+    gap: 20px;
     transition: opacity 0.3s ease;
   }
 
@@ -68,23 +68,23 @@
     background: #1e2126;
     border: 1px solid #2a2e35;
     border-radius: 12px;
-    padding: 20px;
+    padding: 14px;
   }
   .goal-title {
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #edeef0;
-    margin-bottom: 16px;
-    min-height: 44px;
+    margin-bottom: 10px;
+    min-height: 36px;
   }
 
   .rank-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 0;
+    gap: 10px;
+    padding: 7px 0;
     border-bottom: 1px solid #2a2e35;
     transition: color 0.4s ease;
   }
@@ -93,7 +93,7 @@
   .rank-num {
     font-family: ui-monospace, monospace;
     font-weight: 700;
-    width: 32px;
+    width: 28px;
     flex-shrink: 0;
     text-align: center;
     border-radius: 6px;
@@ -112,9 +112,9 @@
   }
   .rank-reward {
     font-family: ui-monospace, monospace;
-    font-size: 12px;
+    font-size: 11px;
     color: #9ba0a8;
-    width: 52px;
+    width: 48px;
     text-align: right;
     flex-shrink: 0;
   }
@@ -122,27 +122,50 @@
   /* Heat-gradient ranking: 1st runs hottest (gold, glowing), fading
      through ember to a cooled, muted 3rd -- the game's own currency
      colors doing double duty as a podium. */
-  .rank-1 { font-size: 26px; }
+  .rank-1 { font-size: 22px; }
   .rank-1 .rank-num { background: rgba(244, 185, 66, 0.15); color: #f4b942; }
   .rank-1 .rank-name, .rank-1 .rank-value { color: #f4b942; text-shadow: 0 0 18px rgba(244, 185, 66, 0.35); }
 
-  .rank-2 { font-size: 21px; }
+  .rank-2 { font-size: 18px; }
   .rank-2 .rank-num { background: rgba(232, 98, 44, 0.15); color: #e8622c; }
   .rank-2 .rank-name, .rank-2 .rank-value { color: #e8622c; }
 
-  .rank-3 { font-size: 18px; }
+  .rank-3 { font-size: 16px; }
   .rank-3 .rank-num { background: rgba(155, 160, 168, 0.15); color: #9ba0a8; }
   .rank-3 .rank-name, .rank-3 .rank-value { color: #9ba0a8; }
 
   .rank-empty .rank-name, .rank-empty .rank-value { color: #4a4f57 !important; text-shadow: none !important; }
+
+  /* Ember tiles: every reaction gets its own tile instead of a
+     tier-averaged chart, so one strained reaction can't hide inside a
+     healthy tier's average. Glow color/intensity IS current yield --
+     the same "rank is heat" idea already used for the leaderboard above,
+     extended to "yield is heat": a reaction running efficiently glows
+     bright gold, one under strain cools toward gray. Small arrow shows
+     whether it moved up or down since the last interval. */
+  .tiles-section { margin-top: 16px; }
+  .tiles-header { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #9ba0a8; margin-bottom: 8px; }
+  .tier-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .tier-row-label { font-size: 12px; font-weight: 700; color: #9ba0a8; width: 44px; flex-shrink: 0; }
+  .tier-tiles { display: flex; gap: 8px; flex: 1; }
+  .tile-wrap { text-align: center; flex: 1; }
+  .tile {
+    height: 46px; border-radius: 10px; margin: 0 auto 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-weight: 700; font-size: 15px;
+    position: relative; transition: box-shadow 0.4s ease, color 0.4s ease;
+  }
+  .tile-arrow { position: absolute; top: -5px; right: -5px; font-size: 10px; width: 15px; height: 15px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #14161a; border: 1px solid #2a2e35; }
+  .tile-label { font-size: 10px; color: #9ba0a8; }
+  .tiles-empty { font-size: 12px; color: #9ba0a8; padding: 6px 0; }
 </style>
 </head>
 <body>
   <div class="header-bar">
     <div class="brand">Stoichi<span>.</span></div>
     <div class="round-block">
-      <span class="round-label">Round</span>
-      <span class="round-value" id="roundNumber">—</span>
+      <span class="round-label">Yield update</span>
+      <span class="round-value" id="marketCountdown">—</span>
     </div>
     <div class="status" id="statusText">Connecting...</div>
   </div>
@@ -151,28 +174,69 @@
 
   <div class="board" id="board"></div>
 
+  <div class="tiles-section">
+    <div class="tiles-header">Reaction yield</div>
+    <div id="tilesBoard"></div>
+  </div>
+
   <script type="module">
     import { db, auth } from './firebase-config.js';
-    import { ref, onValue } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+    import { ref, onValue, runTransaction } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
     import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
     import { COMMON_GOALS } from './goals.js';
+    import { REACTIONS } from './reactions.js';
+    import { computeBoundaryTransition, liveRemainingSeconds, tierOf, yieldFromPressure, BASE_YIELD, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
 
     let studentsData = {};
     let classRecords = {};
     let connected = false;
+    let latestTimer = null;
+    let yieldFluctuationEnabled = false;
+    let marketParams = { runPressureIncrement: DEFAULT_RUN_PRESSURE_INCREMENT, decayPerMinute: DEFAULT_PRESSURE_DECAY_PER_MINUTE, intervalMinutes: DEFAULT_INTERVAL_MINUTES, tierMultipliers: DEFAULT_TIER_MULTIPLIERS };
 
     function nameFor(key) {
       return (studentsData[key] && studentsData[key].name) || key;
     }
 
     function startWatching() {
-    onValue(ref(db, 'round'), (s) => {
-      document.getElementById('roundNumber').textContent = s.val() ?? 0;
+    const marketRef = ref(db, 'market');
+    onValue(marketRef, (s) => {
+      const market = s.val();
+      latestTimer = market && market.timer;
+      renderCountdown();
+      renderTiles(market && market.pressures);
       if (!connected) {
         connected = true;
         document.getElementById('statusText').textContent = 'Connected';
       }
     });
+    onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; renderCountdown(); });
+    onValue(ref(db, 'settings/marketParams'), (s) => { if (s.val()) marketParams = s.val(); });
+
+    function formatCountdown(seconds) {
+      const sec = Math.max(0, Math.round(seconds));
+      return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    }
+    function renderCountdown() {
+      const el = document.getElementById('marketCountdown');
+      if (!yieldFluctuationEnabled) { el.textContent = 'Off'; return; }
+      if (!latestTimer) { el.textContent = '—'; return; }
+      el.textContent = (latestTimer.running ? '' : '⏸ ') + formatCountdown(liveRemainingSeconds(latestTimer, Date.now()));
+    }
+    setInterval(renderCountdown, 1000);
+
+    // This page can also notice the interval is due and advance it, same
+    // as any student tab -- runTransaction makes this safe even if
+    // several pages attempt it at the same moment.
+    setInterval(() => {
+      if (!yieldFluctuationEnabled || !latestTimer) return;
+      if (liveRemainingSeconds(latestTimer, Date.now()) > 0) return;
+      runTransaction(marketRef, (current) => {
+        if (!current || !current.timer || !current.timer.running) return current;
+        if (liveRemainingSeconds(current.timer, Date.now()) > 0) return current;
+        return computeBoundaryTransition(current, REACTIONS, marketParams, Date.now());
+      });
+    }, 1000);
 
     onValue(ref(db, 'settings/paused'), (s) => {
       const isPaused = s.val() === true;
@@ -214,6 +278,48 @@
             '</div>';
         }).join('');
         return '<div class="goal-column"><div class="goal-title">' + g.label + '</div>' + rows + '</div>';
+      }).join('');
+    }
+
+    // One bar per past interval, height = that tier's total extent run
+    // during it, colored green if the tier's average yield improved
+    // versus the interval before, red if it worsened -- same convention
+    // real volume charts use for price direction.
+    const GRAY = [155, 160, 168], EMBER = [232, 98, 44], GOLD = [244, 185, 66];
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function yieldColor(pct) {
+      const t = Math.max(0, Math.min(1, (pct - 50) / 50));
+      const [c1, c2, localT] = t <= 0.5 ? [GRAY, EMBER, t * 2] : [EMBER, GOLD, (t - 0.5) * 2];
+      return [0, 1, 2].map((i) => Math.round(lerp(c1[i], c2[i], localT)));
+    }
+
+    function renderTiles(pressures) {
+      const el = document.getElementById('tilesBoard');
+      if (!pressures) {
+        el.innerHTML = '<div class="tiles-empty">No activity yet -- turn on fluctuating yield to see this fill in.</div>';
+        return;
+      }
+      const byTier = { 1: [], 2: [], 3: [] };
+      REACTIONS.forEach((r) => byTier[tierOf(r)].push(r));
+
+      el.innerHTML = [1, 2, 3].map((tier) => {
+        const tiles = byTier[tier].map((reaction) => {
+          const p = pressures[reaction.id] || { pressure: 0, previousPressure: 0 };
+          const pct = yieldFromPressure(p.pressure);
+          const prevPct = yieldFromPressure(p.previousPressure ?? p.pressure);
+          const [r, g, b] = yieldColor(pct);
+          const intensity = Math.max(0, Math.min(1, (pct - 50) / 50));
+          const blur = Math.round(lerp(4, 26, intensity));
+          const alpha = lerp(0.15, 0.55, intensity).toFixed(2);
+          const up = pct >= prevPct;
+          const label = reaction.name.replace('Reaction ', '');
+          return '<div class="tile-wrap">' +
+            '<div class="tile" style="background:rgba(' + r + ',' + g + ',' + b + ',0.12); color:rgb(' + r + ',' + g + ',' + b + '); box-shadow:0 0 ' + blur + 'px rgba(' + r + ',' + g + ',' + b + ',' + alpha + ');">' +
+            Math.round(pct) +
+            '<span class="tile-arrow" style="color:' + (up ? '#5fbf8f' : '#d9463c') + ';">' + (up ? '&#9650;' : '&#9660;') + '</span>' +
+            '</div><div class="tile-label">' + label + '</div></div>';
+        }).join('');
+        return '<div class="tier-row"><div class="tier-row-label">Tier ' + tier + '</div><div class="tier-tiles">' + tiles + '</div></div>';
       }).join('');
     }
 
