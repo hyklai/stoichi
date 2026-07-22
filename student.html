@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student view — Stoichi</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #14161a;
+    color: #edeef0;
+    font-family: system-ui, -apple-system, sans-serif;
+    text-align: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .status { font-size: 13px; color: #9ba0a8; margin-bottom: 24px; }
+  input[type="text"] {
+    background: #1e2126; border: 1px solid #2a2e35; color: #edeef0;
+    padding: 12px 14px; border-radius: 8px; font-size: 16px; width: 240px; margin: 0 auto 12px; display: block;
+  }
+  button {
+    font-size: 15px; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: none;
+    background: #e8622c; color: #14161a; cursor: pointer;
+  }
+  button:hover { background: #f4b942; }
+  button:disabled { opacity: 0.4; cursor: default; background: #2a2e35; color: #9ba0a8; }
+  button.skip { background: none; border: 1px solid #2a2e35; color: #9ba0a8; font-weight: 400; margin-left: 8px; }
+  button.skip:hover { background: #1e2126; color: #edeef0; }
+  .welcome { font-size: 14px; color: #9ba0a8; margin-bottom: 20px; }
+  .row { display: flex; gap: 20px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat-label { font-size: 12px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.08em; }
+  .stat-number { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .round-number { color: #4fa8d8; }
+  .heat-number { color: #f4b942; }
+  .wasted-number { color: #d9463c; }
+  #joinForm { max-width: 320px; margin: 60px auto 0; }
+  #gameView { max-width: 440px; margin: 0 auto; }
+  .hint { font-size: 13px; color: #9ba0a8; }
+  .panel { background: #1e2126; border: 1px solid #2a2e35; border-radius: 10px; padding: 16px; margin-bottom: 16px; text-align: left; }
+  .panel-label { font-size: 12px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .equation-inline { font-family: ui-monospace, monospace; color: #5fbf8f; font-size: 14px; }
+  .type-tag { font-size: 10px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.06em; }
+  .library-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2e35; gap: 12px; }
+  .library-row:last-child { border-bottom: none; }
+  .library-missing { font-size: 11px; color: #9ba0a8; margin-top: 2px; }
+  .inventory-row { display: flex; justify-content: space-between; padding: 6px 0; font-family: ui-monospace, monospace; font-size: 14px; }
+  .trade-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #2a2e35; }
+  .trade-row:last-child { border-bottom: none; }
+  .trade-letter { font-family: ui-monospace, monospace; font-weight: 700; color: #4fa8d8; width: 20px; }
+  .trade-price { font-size: 11px; color: #9ba0a8; flex: 1; }
+  .trade-row input { width: 64px; background: #14161a; border: 1px solid #2a2e35; color: #edeef0; padding: 6px 8px; border-radius: 6px; font-family: ui-monospace, monospace; }
+  .error-msg { color: #d9463c; font-size: 13px; min-height: 18px; margin: 6px 0; }
+  .bonus-box { border: 1px dashed #f4b942; border-radius: 8px; padding: 14px; margin-top: 6px; }
+  .bonus-label { font-size: 12px; color: #f4b942; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .form-row { margin-bottom: 12px; }
+  .form-row label { font-size: 12px; color: #9ba0a8; display: block; margin-bottom: 4px; }
+  .form-row select, .form-row input {
+    width: 100%; box-sizing: border-box; background: #14161a; border: 1px solid #2a2e35;
+    color: #edeef0; padding: 10px 12px; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 15px;
+  }
+  #bonusFlash { font-size: 13px; color: #5fbf8f; min-height: 18px; margin-bottom: 4px; }
+  #pausedBanner {
+    display: none; background: rgba(217, 70, 60, 0.12); border: 1px solid #d9463c; color: #d9463c;
+    font-size: 13px; font-weight: 600; padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; text-align: left;
+  }
+  .goal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 8px 0 2px; border-bottom: none; }
+  .reward-line { font-size: 11px; color: #9ba0a8; padding-bottom: 8px; border-bottom: 1px solid #2a2e35; }
+  .reward-line:last-of-type { border-bottom: none; }
+
+  /* Tabs */
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 12px; overflow-x: auto; }
+  .tab-btn {
+    flex: 1; min-width: 58px; background: #1e2126; border: 1px solid #2a2e35; color: #9ba0a8;
+    font-size: 13px; font-weight: 600; padding: 11px 6px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .tab-btn.active { background: #e8622c; color: #14161a; border-color: #e8622c; }
+
+  /* Collapsible tier groups */
+  details { margin-bottom: 4px; border-bottom: 1px solid #2a2e35; }
+  details:last-child { border-bottom: none; }
+  summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #4fa8d8; padding: 10px 0; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸ '; }
+  details[open] summary::before { content: '▾ '; }
+
+  /* Hidden quest selection */
+  .quest-card { background: #1e2126; border: 1px solid #2a2e35; border-radius: 10px; padding: 16px; margin-bottom: 12px; text-align: left; }
+  .quest-label { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+  .quest-reward { font-size: 13px; color: #f4b942; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+  <div id="joinForm">
+    <h1>Join Stoichi</h1>
+    <div class="status">Enter your name to join this session</div>
+    <input type="text" id="nameInput" placeholder="Your name" maxlength="30">
+    <button id="joinBtn">Join game</button>
+  </div>
+
+  <div id="gameView" style="display:none;">
+    <h1>Stoichi</h1>
+    <div class="status" id="status">Connecting to database...</div>
+    <div class="welcome" id="welcome"></div>
+    <div class="row">
+      <div><div class="stat-label">Round</div><div class="stat-number round-number" id="roundNumber">—</div></div>
+      <div><div class="stat-label">Heat</div><div class="stat-number heat-number" id="heatNumber">—</div></div>
+      <div><div class="stat-label">Wasted</div><div class="stat-number wasted-number" id="wastedNumber">—</div></div>
+    </div>
+
+    <div id="bonusFlash"></div>
+    <div id="pausedBanner">⏸ Your teacher has paused the game -- buying, selling, and running reactions are disabled until resumed.</div>
+
+    <div id="questSelectScreen" class="panel" style="display:none;">
+      <div class="panel-label">Choose your hidden quest</div>
+      <p class="hint" style="margin-top:0;">Pick one before you start buying. Only you can see which quest you chose -- other students and the class display never see it.</p>
+      <div id="questOptions"></div>
+    </div>
+
+    <div id="mainScreen" style="display:none;">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="library">Library</button>
+        <button class="tab-btn" data-tab="inventory">Inv</button>
+        <button class="tab-btn" data-tab="buy">Buy</button>
+        <button class="tab-btn" data-tab="sell">Sell</button>
+        <button class="tab-btn" data-tab="goals">Goals</button>
+      </div>
+      <div class="tab-panel panel" data-panel="library">
+        <div class="panel-label">Reaction library</div>
+        <div id="libraryPanel"></div>
+      </div>
+      <div class="tab-panel panel" data-panel="inventory" style="display:none;">
+        <div class="panel-label">Inventory</div>
+        <div id="inventoryPanel"></div>
+      </div>
+      <div class="tab-panel panel" data-panel="buy" style="display:none;">
+        <div class="panel-label">Buy reactants</div>
+        <div id="buyPanel"></div>
+      </div>
+      <div class="tab-panel panel" data-panel="sell" style="display:none;">
+        <div class="panel-label">Sell inventory</div>
+        <div id="sellPanel"></div>
+      </div>
+      <div class="tab-panel panel" data-panel="goals" style="display:none;">
+        <div id="goalsContent"></div>
+      </div>
+    </div>
+
+    <div id="confirmScreen" class="panel" style="display:none;">
+      <div class="panel-label">Confirm reaction</div>
+      <div class="hint" id="confirmReactionLabel" style="margin-bottom:10px;"></div>
+      <div id="commitInputs"></div>
+      <div class="error-msg" id="commitError"></div>
+      <div class="bonus-box" id="bonusBox">
+        <div class="bonus-label">Optional bonus (leave blank to skip)</div>
+        <div class="form-row" id="bonusQuestionBox"></div>
+      </div>
+      <button id="runConfirmBtn">Run</button>
+      <button class="skip" id="backBtn">Back</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { db, auth } from './firebase-config.js';
+    import { ref, onValue, get, set, update } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+    import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
+    import { REACTIONS, PRICES, equationString } from './reactions.js';
+    import { solveReaction } from './stoich.js';
+    import { HIDDEN_GOALS, COMMON_GOALS, COMMON_GOAL_SPECIES } from './goals.js';
+
+    // Tunable constants -- edit here.
+    const STARTING_HEAT = 2000;
+    const BUY_MARKUP = 1.2; // 20% markup on buying anything except the two base materials
+
+
+    function sanitizeKey(name) {
+      return name.trim().toLowerCase().replace(/[.#$\[\]\/\s]+/g, '_').slice(0, 40) || 'student';
+    }
+    function withinTolerance(entered, correct) {
+      if (isNaN(entered)) return false;
+      const tolerance = Math.max(Math.abs(correct) * 0.03, 0.05);
+      return Math.abs(entered - correct) <= tolerance;
+    }
+    function pickBonusQuestionType(reaction) {
+      const opts = [];
+      if (reaction.reactants.length > 1) opts.push('limiting');
+      reaction.reactants.forEach((r) => opts.push('consumed_' + r.letter));
+      reaction.products.forEach((p) => opts.push('formed_' + p.letter));
+      return opts[Math.floor(Math.random() * opts.length)];
+    }
+    function buyPrice(letter) {
+      return PRICES[letter] * (letter === 'A' || letter === 'B' ? 1 : BUY_MARKUP);
+    }
+
+    // Class-wide records, live in /classRecords, separate from any one
+    // student's own stats. bumpSingleRecord tracks "who currently has
+    // the most" (with ties sharing the record). bumpTop3 tracks a ranked
+    // top 3 (direction 'max' or 'min'), replacing this student's own
+    // prior entry each time rather than duplicating it.
+    async function bumpSingleRecord(key, value) {
+      const recRef = ref(db, 'classRecords/' + key);
+      const snap = await get(recRef);
+      const current = snap.val();
+      if (!current || value > current.value) {
+        await set(recRef, { value: value, holders: [studentKey] });
+      } else if (value === current.value) {
+        const holders = current.holders || [];
+        if (!holders.includes(studentKey)) {
+          await set(recRef, { value: current.value, holders: holders.concat([studentKey]) });
+        }
+      }
+    }
+    async function bumpTop3(key, value, direction) {
+      const recRef = ref(db, 'classRecords/' + key);
+      const snap = await get(recRef);
+      let top = (snap.val() && snap.val().top) || [];
+      top = top.filter((e) => e.studentKey !== studentKey);
+      top.push({ studentKey: studentKey, value: value });
+      top.sort((a, b) => direction === 'min' ? a.value - b.value : b.value - a.value);
+      top = top.slice(0, 3);
+      await set(recRef, { top: top });
+    }
+
+    let studentKey = null;
+    let currentHeat = STARTING_HEAT;
+    let currentWasted = 0;
+    let inventory = {};
+    let library = {};
+    let hiddenGoalId = null;
+    let paused = false;
+    let sessionId = null;
+    let hasSeenSessionId = false;
+    let bonusEnabled = true;
+    let myQuestClassRecord = null;
+    let myQuestRecordListenerSet = false;
+    let offeredQuests = [];
+    let pendingReactionId = null;
+    let pendingQuestionType = null;
+    let lastFlash = '';
+    let stats = {};
+
+    async function joinAsStudent(name) {
+      studentKey = sanitizeKey(name);
+      const studentRef = ref(db, 'students/' + studentKey);
+      const snap = await get(studentRef);
+      if (!snap.exists()) {
+        await set(studentRef, {
+          name, heat: STARTING_HEAT, totalWasted: 0, inventory: {},
+          totalProducedBySpecies: {}, bestSingleRunYield: 0, bonusCorrectCount: 0, totalSoldRevenue: 0,
+          hiddenGoalId: null,
+          ownerId: auth.currentUser.uid
+        });
+      }
+      localStorage.setItem('stoichiName', name);
+      document.getElementById('joinForm').style.display = 'none';
+      document.getElementById('gameView').style.display = 'block';
+      document.getElementById('welcome').textContent = 'Playing as ' + name;
+      watchGameState();
+    }
+
+    function watchGameState() {
+      onValue(ref(db, 'sessionId'), (s) => {
+        const newId = s.val();
+        if (hasSeenSessionId && newId !== sessionId) {
+          forceReturnToJoinForm();
+        }
+        sessionId = newId;
+        hasSeenSessionId = true;
+      });
+      onValue(ref(db, 'round'), (s) => {
+        document.getElementById('roundNumber').textContent = s.val() ?? 0;
+        document.getElementById('status').textContent = 'Connected';
+      });
+      onValue(ref(db, 'library'), (s) => { library = s.val() || {}; renderMain(); });
+      onValue(ref(db, 'settings/bonusEnabled'), (s) => { bonusEnabled = s.val() !== false; });
+      onValue(ref(db, 'settings/paused'), (s) => { paused = s.val() === true; renderMain(); });
+      onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
+        currentHeat = s.val() ?? STARTING_HEAT;
+        document.getElementById('heatNumber').textContent = currentHeat.toFixed(2);
+        renderMain();
+      });
+      onValue(ref(db, 'students/' + studentKey + '/totalWasted'), (s) => {
+        currentWasted = s.val() ?? 0;
+        document.getElementById('wastedNumber').textContent = currentWasted.toFixed(2);
+      });
+      onValue(ref(db, 'students/' + studentKey + '/inventory'), (s) => { inventory = s.val() || {}; renderMain(); });
+      onValue(ref(db, 'students/' + studentKey), (s) => { stats = s.val() || {}; renderGoalsPanel(); });
+      onValue(ref(db, 'students/' + studentKey + '/hiddenGoalId'), (s) => {
+        hiddenGoalId = s.val();
+        updateTopLevelScreen();
+        if (hiddenGoalId && !myQuestRecordListenerSet) {
+          myQuestRecordListenerSet = true;
+          const hg = HIDDEN_GOALS.find((g) => g.id === hiddenGoalId);
+          if (hg && hg.recordKey) {
+            onValue(ref(db, 'classRecords/' + hg.recordKey), (recSnap) => {
+              myQuestClassRecord = recSnap.val();
+              renderGoalsPanel();
+            });
+          }
+        }
+      });
+    }
+
+    function forceReturnToJoinForm() {
+      localStorage.removeItem('stoichiName');
+      studentKey = null;
+      document.getElementById('gameView').style.display = 'none';
+      document.getElementById('joinForm').style.display = 'block';
+      document.getElementById('nameInput').value = '';
+      document.querySelector('#joinForm .status').textContent = 'Your teacher started a new session -- enter your name to rejoin.';
+    }
+
+    function getUnlockedReactions() {
+      return REACTIONS.filter((r) => library[r.id]);
+    }
+
+    // --- Top-level screen switching: quest select -> main <-> confirm ---
+    function updateTopLevelScreen() {
+      if (!hiddenGoalId) {
+        showTopLevel('questSelectScreen');
+        renderQuestSelectScreen();
+      } else if (pendingReactionId) {
+        showTopLevel('confirmScreen');
+      } else {
+        showTopLevel('mainScreen');
+        renderMain();
+      }
+    }
+    function showTopLevel(id) {
+      ['questSelectScreen', 'mainScreen', 'confirmScreen'].forEach((s) => {
+        document.getElementById(s).style.display = (s === id ? 'block' : 'none');
+      });
+    }
+
+    function pickTwoQuests() {
+      if (HIDDEN_GOALS.length <= 2) return HIDDEN_GOALS.slice();
+      return HIDDEN_GOALS.slice().sort(() => Math.random() - 0.5).slice(0, 2);
+    }
+
+    function renderQuestSelectScreen() {
+      if (offeredQuests.length === 0) offeredQuests = pickTwoQuests();
+      const el = document.getElementById('questOptions');
+      el.innerHTML = offeredQuests.map((q) =>
+        '<div class="quest-card"><div class="quest-label">' + q.label + '</div>' +
+        '<div class="quest-reward">Reward: +' + q.reward + ' heat</div>' +
+        '<button data-id="' + q.id + '" class="quest-choose-btn">Choose this quest</button></div>'
+      ).join('');
+      el.querySelectorAll('.quest-choose-btn').forEach((btn) => {
+        btn.addEventListener('click', () => chooseQuest(btn.dataset.id));
+      });
+    }
+
+    async function chooseQuest(questId) {
+      await update(ref(db, 'students/' + studentKey), { hiddenGoalId: questId });
+    }
+
+    // --- Tabs ---
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.style.display = (panel.dataset.panel === tabName) ? 'block' : 'none';
+      });
+    }
+
+    function renderMain() {
+      if (!hiddenGoalId || pendingReactionId) return;
+      document.getElementById('bonusFlash').textContent = lastFlash;
+      document.getElementById('pausedBanner').style.display = paused ? 'block' : 'none';
+      renderGoalsPanel();
+      renderLibraryPanel();
+      renderInventoryPanel();
+      renderBuyPanel();
+      renderSellPanel();
+    }
+
+    function renderGoalsPanel() {
+      let html = '<div class="panel-label">Common goals -- rewarded at the end</div>' +
+        COMMON_GOALS.map((g) =>
+          '<div class="goal-row"><span>' + g.label + '</span><span>' + g.getValue(stats).toFixed(2) + '</span></div>' +
+          '<div class="reward-line">1st: +' + g.rewards.first + ' heat &middot; 2nd: +' + g.rewards.second + ' heat &middot; 3rd: +' + g.rewards.third + ' heat</div>'
+        ).join('');
+      const hg = HIDDEN_GOALS.find((g) => g.id === hiddenGoalId);
+      html += '<div class="panel-label" style="margin-top:18px;">Your hidden quest</div>';
+      if (hg) {
+        const classBest = myQuestClassRecord ? myQuestClassRecord.value.toFixed(2) : '0.00';
+        html += '<div class="goal-row"><span>' + hg.label + '</span><span>' + hg.getValue(stats).toFixed(2) + '</span></div>' +
+          '<div class="reward-line">Reward: +' + hg.reward + ' heat &middot; Class best: ' + classBest + '</div>';
+      }
+      document.getElementById('goalsContent').innerHTML = html;
+    }
+
+    function libraryRowHtml(r) {
+      const missing = r.reactants.filter((re) => (inventory[re.letter] || 0) <= 0);
+      const canRun = !paused && missing.length === 0;
+      const missingText = (!paused && missing.length > 0) ?
+        '<div class="library-missing">Need some ' + missing.map((re) => re.letter).join(', ') + '</div>' : '';
+      return '<div class="library-row">' +
+        '<div><span class="type-tag">' + r.type + '</span><br><strong>' + r.name + '</strong><br><span class="equation-inline">' + equationString(r) + '</span>' + missingText + '</div>' +
+        '<button data-id="' + r.id + '" class="run-btn" ' + (canRun ? '' : 'disabled') + '>Run</button>' +
+        '</div>';
+    }
+
+    function renderLibraryPanel() {
+      const unlocked = getUnlockedReactions();
+      const el = document.getElementById('libraryPanel');
+      if (unlocked.length === 0) {
+        el.innerHTML = '<p class="hint">Waiting for your teacher to unlock a reaction.</p>';
+        return;
+      }
+      const tiers = {};
+      unlocked.forEach((r) => {
+        const tier = r.name.split(' ')[1].split('.')[0];
+        if (!tiers[tier]) tiers[tier] = [];
+        tiers[tier].push(r);
+      });
+      const tierKeys = Object.keys(tiers).sort((a, b) => Number(a) - Number(b));
+      el.innerHTML = tierKeys.map((tier, idx) => {
+        const reactions = tiers[tier].slice().sort((a, b) => {
+          const canRunA = a.reactants.every((re) => (inventory[re.letter] || 0) > 0);
+          const canRunB = b.reactants.every((re) => (inventory[re.letter] || 0) > 0);
+          if (canRunA === canRunB) return 0;
+          return canRunA ? -1 : 1;
+        });
+        return '<details' + (idx === 0 ? ' open' : '') + '><summary>Tier ' + tier + ' (' + reactions.length + ')</summary>' +
+          reactions.map(libraryRowHtml).join('') + '</details>';
+      }).join('');
+      el.querySelectorAll('.run-btn').forEach((btn) => {
+        btn.addEventListener('click', () => openConfirmScreen(btn.dataset.id));
+      });
+    }
+
+    function renderInventoryPanel() {
+      const el = document.getElementById('inventoryPanel');
+      const letters = Object.keys(inventory).filter((l) => (inventory[l] || 0) > 0).sort();
+      el.innerHTML = letters.length === 0
+        ? '<p class="hint">Empty -- buy some reactants below.</p>'
+        : letters.map((l) => '<div class="inventory-row"><span>' + l + '</span><span>' + inventory[l].toFixed(2) + ' mol</span></div>').join('');
+    }
+
+    function renderBuyPanel() {
+      const unlocked = getUnlockedReactions();
+      const letterSet = new Set();
+      unlocked.forEach((r) => r.reactants.forEach((re) => letterSet.add(re.letter)));
+      const letters = Array.from(letterSet).sort();
+      const el = document.getElementById('buyPanel');
+      if (letters.length === 0) {
+        el.innerHTML = '<p class="hint">Nothing to buy yet -- ask your teacher to unlock a reaction.</p>';
+        return;
+      }
+      el.innerHTML = letters.map((l) =>
+        '<div class="trade-row">' +
+        '<span class="trade-letter">' + l + '</span>' +
+        '<span class="trade-price">' + buyPrice(l).toFixed(2) + ' heat/mol</span>' +
+        '<input type="number" min="0" step="0.01" value="1" id="buyQty_' + l + '" ' + (paused ? 'disabled' : '') + '>' +
+        '<button data-letter="' + l + '" class="buy-btn" ' + (paused ? 'disabled' : '') + '>Buy</button>' +
+        '</div>'
+      ).join('') + '<div class="error-msg" id="buyError"></div>';
+      el.querySelectorAll('.buy-btn').forEach((btn) => {
+        btn.addEventListener('click', () => buyLetter(btn.dataset.letter));
+      });
+    }
+
+    function renderSellPanel() {
+      const letters = Object.keys(inventory).filter((l) => (inventory[l] || 0) > 0).sort();
+      const el = document.getElementById('sellPanel');
+      if (letters.length === 0) {
+        el.innerHTML = '<p class="hint">Nothing to sell yet.</p>';
+        return;
+      }
+      el.innerHTML = letters.map((l) =>
+        '<div class="trade-row">' +
+        '<span class="trade-letter">' + l + '</span>' +
+        '<span class="trade-price">' + PRICES[l] + ' heat/mol (have ' + inventory[l].toFixed(2) + ')</span>' +
+        '<input type="number" min="0" max="' + inventory[l] + '" step="0.01" value="' + inventory[l].toFixed(2) + '" id="sellQty_' + l + '" ' + (paused ? 'disabled' : '') + '>' +
+        '<button data-letter="' + l + '" class="buy-btn" ' + (paused ? 'disabled' : '') + '>Sell</button>' +
+        '</div>'
+      ).join('') + '<div class="error-msg" id="sellError"></div>';
+      el.querySelectorAll('.buy-btn').forEach((btn) => {
+        btn.addEventListener('click', () => sellLetter(btn.dataset.letter));
+      });
+    }
+
+    async function buyLetter(letter) {
+      const errEl = document.getElementById('buyError');
+      if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
+      const qty = Math.max(0, parseFloat(document.getElementById('buyQty_' + letter).value) || 0);
+      if (qty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+      const cost = qty * buyPrice(letter);
+      if (cost > currentHeat) { errEl.textContent = 'Not enough heat for that.'; return; }
+      errEl.textContent = '';
+      await update(ref(db, 'students/' + studentKey), {
+        heat: currentHeat - cost,
+        ['inventory/' + letter]: (inventory[letter] || 0) + qty
+      });
+    }
+
+    async function sellLetter(letter) {
+      const errEl = document.getElementById('sellError');
+      if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
+      const have = inventory[letter] || 0;
+      const qty = Math.max(0, parseFloat(document.getElementById('sellQty_' + letter).value) || 0);
+      if (qty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+      if (qty > have) { errEl.textContent = "You don't have that much " + letter + '.'; return; }
+      errEl.textContent = '';
+      const revenue = qty * PRICES[letter];
+      const newTotalSoldRevenue = (stats.totalSoldRevenue || 0) + revenue;
+      await update(ref(db, 'students/' + studentKey), {
+        heat: currentHeat + revenue,
+        ['inventory/' + letter]: have - qty,
+        totalSoldRevenue: newTotalSoldRevenue
+      });
+      await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
+    }
+
+    function openConfirmScreen(reactionId) {
+      pendingReactionId = reactionId;
+      const reaction = REACTIONS.find((r) => r.id === reactionId);
+      pendingQuestionType = bonusEnabled ? pickBonusQuestionType(reaction) : null;
+      updateTopLevelScreen();
+      renderConfirmScreen(reaction);
+    }
+
+    function renderConfirmScreen(reaction) {
+      document.getElementById('confirmReactionLabel').textContent = reaction.name + ' (' + reaction.type + '): ' + equationString(reaction);
+      document.getElementById('commitError').textContent = '';
+      document.getElementById('commitInputs').innerHTML = reaction.reactants.map((r) => {
+        const have = inventory[r.letter] || 0;
+        return '<div class="form-row"><label>Commit moles of ' + r.letter + ' (you have ' + have.toFixed(2) + ' -- the rest stays in inventory)</label>' +
+          '<input type="number" min="0" max="' + have + '" step="0.01" value="' + have.toFixed(2) + '" id="commit_' + r.letter + '"></div>';
+      }).join('');
+
+      const bonusBoxEl = document.getElementById('bonusBox');
+      if (!pendingQuestionType) {
+        bonusBoxEl.style.display = 'none';
+        return;
+      }
+      bonusBoxEl.style.display = 'block';
+      const qBox = document.getElementById('bonusQuestionBox');
+      if (pendingQuestionType === 'limiting') {
+        qBox.innerHTML = '<label>Which reactant will be limiting?</label><select id="bonusAnswerInput2">' +
+          '<option value="" selected>Skip</option>' +
+          reaction.reactants.map((r) => '<option value="' + r.letter + '">' + r.letter + '</option>').join('') + '</select>';
+      } else if (pendingQuestionType.indexOf('formed_') === 0) {
+        const letter = pendingQuestionType.slice('formed_'.length);
+        qBox.innerHTML = '<label>Moles of ' + letter + ' that will form?</label><input type="number" step="any" id="bonusAnswerInput" placeholder="Leave blank to skip">';
+      } else {
+        const letter = pendingQuestionType.slice('consumed_'.length);
+        qBox.innerHTML = '<label>Moles of ' + letter + ' that will be consumed?</label><input type="number" step="any" id="bonusAnswerInput" placeholder="Leave blank to skip">';
+      }
+    }
+
+    function readCommitted(reaction) {
+      const committed = {};
+      reaction.reactants.forEach((r) => {
+        const have = inventory[r.letter] || 0;
+        const val = Math.max(0, parseFloat(document.getElementById('commit_' + r.letter).value) || 0);
+        committed[r.letter] = Math.min(val, have);
+      });
+      return committed;
+    }
+
+    function gradeBonusAnswer(result) {
+      if (!pendingQuestionType) return null;
+      if (pendingQuestionType === 'limiting') {
+        const sel = document.getElementById('bonusAnswerInput2').value;
+        return sel ? (sel === result.limitingLetter) : null;
+      }
+      const raw = document.getElementById('bonusAnswerInput').value;
+      if (raw === '') return null;
+      const val = parseFloat(raw);
+      if (pendingQuestionType.indexOf('formed_') === 0) {
+        const letter = pendingQuestionType.slice('formed_'.length);
+        return withinTolerance(val, result.formed[letter]);
+      }
+      const letter = pendingQuestionType.slice('consumed_'.length);
+      return withinTolerance(val, result.consumed[letter]);
+    }
+
+    document.getElementById('runConfirmBtn').addEventListener('click', async () => {
+      if (paused) {
+        document.getElementById('commitError').textContent = 'Your teacher paused the game -- use Back and wait for it to resume.';
+        return;
+      }
+      const reaction = REACTIONS.find((r) => r.id === pendingReactionId);
+      const committed = readCommitted(reaction);
+      const allPositive = reaction.reactants.every((r) => committed[r.letter] > 0);
+      if (!allPositive) {
+        document.getElementById('commitError').textContent = 'Commit more than 0 of each reactant, or use Back to cancel.';
+        return;
+      }
+
+      const result = solveReaction(reaction, committed);
+      const heatEarned = result.extent * reaction.heatPerExtent;
+
+      const newInventory = Object.assign({}, inventory);
+      let wastedThisRun = 0;
+      reaction.reactants.forEach((r) => {
+        newInventory[r.letter] = (newInventory[r.letter] || 0) - committed[r.letter];
+        wastedThisRun += committed[r.letter] - result.consumed[r.letter];
+      });
+      let thisRunMax = 0;
+      const newProducedBySpecies = Object.assign({}, stats.totalProducedBySpecies || {});
+      reaction.products.forEach((p) => {
+        newInventory[p.letter] = (newInventory[p.letter] || 0) + result.formed[p.letter];
+        newProducedBySpecies[p.letter] = (newProducedBySpecies[p.letter] || 0) + result.formed[p.letter];
+        if (result.formed[p.letter] > thisRunMax) thisRunMax = result.formed[p.letter];
+      });
+
+      const isCorrect = gradeBonusAnswer(result);
+      const bonus = isCorrect === true ? result.extent * reaction.bonusPerExtent : 0;
+
+      const productSummary = reaction.products.map((p) => result.formed[p.letter].toFixed(2) + ' mol ' + p.letter).join(', ');
+      let flash = 'Ran ' + reaction.name + ': +' + heatEarned.toFixed(2) + ' heat, ' + productSummary + ' produced.';
+      if (isCorrect === true) flash += ' Bonus correct: +' + bonus.toFixed(2) + ' heat.';
+      else if (isCorrect === false) flash += ' Bonus answer was off -- no extra heat.';
+      if (wastedThisRun > 0.0001) flash += ' ' + wastedThisRun.toFixed(2) + ' mol wasted.';
+      lastFlash = flash;
+
+      const newTotalWasted = currentWasted + wastedThisRun;
+      const newBestSingleRunYield = Math.max(stats.bestSingleRunYield || 0, thisRunMax);
+      const newBonusCorrectCount = (stats.bonusCorrectCount || 0) + (isCorrect === true ? 1 : 0);
+
+      await update(ref(db, 'students/' + studentKey), {
+        heat: currentHeat + heatEarned + bonus,
+        inventory: newInventory,
+        totalWasted: newTotalWasted,
+        totalProducedBySpecies: newProducedBySpecies,
+        bestSingleRunYield: newBestSingleRunYield,
+        bonusCorrectCount: newBonusCorrectCount
+      });
+
+      // Class-wide records: every species produced gets tracked
+      // regardless of whether a hidden goal currently uses it, so the
+      // history is already there whenever one references it later.
+      const recordUpdates = [];
+      reaction.products.forEach((p) => {
+        recordUpdates.push(bumpSingleRecord('species_' + p.letter, newProducedBySpecies[p.letter]));
+      });
+      if (newProducedBySpecies[COMMON_GOAL_SPECIES] !== undefined) {
+        recordUpdates.push(bumpTop3('commonGoal_mostProduced', newProducedBySpecies[COMMON_GOAL_SPECIES], 'max'));
+      }
+      recordUpdates.push(bumpTop3('commonGoal_leastWaste', newTotalWasted, 'min'));
+      recordUpdates.push(bumpTop3('commonGoal_bigProducer', newBestSingleRunYield, 'max'));
+      if (isCorrect === true) {
+        recordUpdates.push(bumpSingleRecord('bonusMaster', newBonusCorrectCount));
+      }
+      await Promise.all(recordUpdates);
+
+      closeConfirmScreen();
+    });
+
+    document.getElementById('backBtn').addEventListener('click', () => {
+      closeConfirmScreen();
+    });
+
+    function closeConfirmScreen() {
+      pendingReactionId = null;
+      pendingQuestionType = null;
+      updateTopLevelScreen();
+    }
+
+    async function ensureSignedIn() {
+      if (!auth.currentUser) {
+        await signInAnonymously(auth);
+      }
+    }
+
+    document.getElementById('joinBtn').addEventListener('click', async () => {
+      const name = document.getElementById('nameInput').value.trim();
+      if (!name) return;
+      await ensureSignedIn();
+      joinAsStudent(name);
+    });
+
+    (async () => {
+      const savedName = localStorage.getItem('stoichiName');
+      if (savedName) {
+        await ensureSignedIn();
+        joinAsStudent(savedName);
+      }
+    })();
+  </script>
+</body>
+</html>

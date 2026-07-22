@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stoichi — Class Display</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    width: 1024px;
+    height: 768px;
+    background: #14161a;
+    color: #edeef0;
+    font-family: system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    padding: 28px 36px;
+  }
+
+  .header-bar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid #2a2e35;
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+  }
+  .brand {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .brand span { color: #f4b942; }
+  .round-block { display: flex; align-items: baseline; gap: 10px; }
+  .round-label { font-size: 15px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.1em; }
+  .round-value {
+    font-family: ui-monospace, monospace;
+    font-size: 32px;
+    font-weight: 700;
+    color: #4fa8d8;
+  }
+  .status { font-size: 13px; color: #9ba0a8; }
+
+  .paused-banner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(217, 70, 60, 0.15);
+    border: 1px solid #d9463c;
+    color: #d9463c;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 14px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .board.is-paused { opacity: 0.45; }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    transition: opacity 0.3s ease;
+  }
+
+  .goal-column {
+    background: #1e2126;
+    border: 1px solid #2a2e35;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .goal-title {
+    font-size: 17px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #edeef0;
+    margin-bottom: 16px;
+    min-height: 44px;
+  }
+
+  .rank-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #2a2e35;
+    transition: color 0.4s ease;
+  }
+  .rank-row:last-child { border-bottom: none; }
+
+  .rank-num {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    width: 32px;
+    flex-shrink: 0;
+    text-align: center;
+    border-radius: 6px;
+  }
+  .rank-name {
+    flex: 1;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rank-value {
+    font-family: ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .rank-reward {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    color: #9ba0a8;
+    width: 52px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* Heat-gradient ranking: 1st runs hottest (gold, glowing), fading
+     through ember to a cooled, muted 3rd -- the game's own currency
+     colors doing double duty as a podium. */
+  .rank-1 { font-size: 26px; }
+  .rank-1 .rank-num { background: rgba(244, 185, 66, 0.15); color: #f4b942; }
+  .rank-1 .rank-name, .rank-1 .rank-value { color: #f4b942; text-shadow: 0 0 18px rgba(244, 185, 66, 0.35); }
+
+  .rank-2 { font-size: 21px; }
+  .rank-2 .rank-num { background: rgba(232, 98, 44, 0.15); color: #e8622c; }
+  .rank-2 .rank-name, .rank-2 .rank-value { color: #e8622c; }
+
+  .rank-3 { font-size: 18px; }
+  .rank-3 .rank-num { background: rgba(155, 160, 168, 0.15); color: #9ba0a8; }
+  .rank-3 .rank-name, .rank-3 .rank-value { color: #9ba0a8; }
+
+  .rank-empty .rank-name, .rank-empty .rank-value { color: #4a4f57 !important; text-shadow: none !important; }
+</style>
+</head>
+<body>
+  <div class="header-bar">
+    <div class="brand">Stoichi<span>.</span></div>
+    <div class="round-block">
+      <span class="round-label">Round</span>
+      <span class="round-value" id="roundNumber">—</span>
+    </div>
+    <div class="status" id="statusText">Connecting...</div>
+  </div>
+
+  <div class="paused-banner" id="pausedBanner">⏸ &nbsp;PAUSED BY TEACHER</div>
+
+  <div class="board" id="board"></div>
+
+  <script type="module">
+    import { db, auth } from './firebase-config.js';
+    import { ref, onValue } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+    import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
+    import { COMMON_GOALS } from './goals.js';
+
+    let studentsData = {};
+    let classRecords = {};
+    let connected = false;
+
+    function nameFor(key) {
+      return (studentsData[key] && studentsData[key].name) || key;
+    }
+
+    function startWatching() {
+    onValue(ref(db, 'round'), (s) => {
+      document.getElementById('roundNumber').textContent = s.val() ?? 0;
+      if (!connected) {
+        connected = true;
+        document.getElementById('statusText').textContent = 'Connected';
+      }
+    });
+
+    onValue(ref(db, 'settings/paused'), (s) => {
+      const isPaused = s.val() === true;
+      document.getElementById('pausedBanner').style.display = isPaused ? 'flex' : 'none';
+      document.getElementById('board').classList.toggle('is-paused', isPaused);
+    });
+
+    onValue(ref(db, 'students'), (s) => {
+      studentsData = s.val() || {};
+      renderBoard();
+    });
+
+    onValue(ref(db, 'classRecords'), (s) => {
+      classRecords = s.val() || {};
+      renderBoard();
+    });
+    }
+
+    function renderBoard() {
+      const el = document.getElementById('board');
+      el.innerHTML = COMMON_GOALS.map((g) => {
+        const rec = classRecords['commonGoal_' + g.id];
+        const top = (rec && rec.top) || [];
+        const places = [
+          { rank: 1, cls: 'rank-1', reward: g.rewards.first },
+          { rank: 2, cls: 'rank-2', reward: g.rewards.second },
+          { rank: 3, cls: 'rank-3', reward: g.rewards.third }
+        ];
+        const rows = places.map((p, i) => {
+          const entry = top[i];
+          const filled = !!entry;
+          const name = filled ? nameFor(entry.studentKey) : 'Unclaimed';
+          const value = filled ? entry.value.toFixed(2) : '—';
+          return '<div class="rank-row ' + p.cls + (filled ? '' : ' rank-empty') + '">' +
+            '<span class="rank-num">' + p.rank + '</span>' +
+            '<span class="rank-name">' + name + '</span>' +
+            '<span class="rank-value">' + value + '</span>' +
+            '<span class="rank-reward">+' + p.reward + '</span>' +
+            '</div>';
+        }).join('');
+        return '<div class="goal-column"><div class="goal-title">' + g.label + '</div>' + rows + '</div>';
+      }).join('');
+    }
+
+    signInAnonymously(auth).then(startWatching).catch((err) => {
+      document.getElementById('statusText').textContent = 'Connection error -- check that Anonymous sign-in is enabled.';
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

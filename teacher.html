@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher panel — Stoichi</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #14161a;
+    color: #edeef0;
+    font-family: system-ui, -apple-system, sans-serif;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; text-align: center; }
+  input[type="email"], input[type="password"] {
+    display: block; width: 100%; box-sizing: border-box; background: #14161a; border: 1px solid #2a2e35;
+    color: #edeef0; padding: 12px 14px; border-radius: 8px; font-size: 15px; margin-bottom: 10px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .status { font-size: 13px; color: #9ba0a8; margin-bottom: 20px; }
+  button {
+    font-size: 15px; font-weight: 600; padding: 12px 20px; border-radius: 10px; border: none;
+    background: #e8622c; color: #14161a; cursor: pointer;
+  }
+  button:hover { background: #f4b942; }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.5; cursor: default; background: #2a2e35; color: #9ba0a8; }
+  button:disabled:hover { background: #2a2e35; }
+  .reset {
+    background: none; border: 1px solid #2a2e35; color: #9ba0a8; font-size: 13px;
+    font-weight: 400; padding: 8px 16px; margin-left: 10px;
+  }
+  .reset:hover { background: #1e2126; color: #edeef0; }
+  #pauseToggleBtn.paused-active { background: #d9463c; }
+  #pauseToggleBtn.paused-active:hover { background: #e8574c; }
+
+  /* Tabs */
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto; }
+  .tab-btn {
+    flex: 1; min-width: 58px; background: #1e2126; border: 1px solid #2a2e35; color: #9ba0a8;
+    font-size: 13px; font-weight: 600; padding: 11px 6px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .tab-btn.active { background: #e8622c; color: #14161a; border-color: #e8622c; }
+  .tab-panel { text-align: left; }
+
+  .section {
+    background: #1e2126; border: 1px solid #2a2e35; border-radius: 10px;
+    padding: 16px; margin-bottom: 16px; text-align: left;
+  }
+  .section-label {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #9ba0a8; margin-bottom: 10px;
+  }
+  .round-label { font-size: 14px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; }
+  .round-number {
+    font-size: 56px; font-weight: 700; color: #f4b942; margin: 4px 0 16px;
+    font-variant-numeric: tabular-nums; text-align: center;
+  }
+  .round-controls { text-align: center; margin-bottom: 4px; }
+
+  .current-reaction { font-size: 13px; color: #4fa8d8; margin-bottom: 12px; min-height: 18px; }
+  .reaction-buttons { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+  .reaction-btn {
+    background: #1e2126; border: 1px solid #2a2e35; color: #edeef0; font-size: 14px; font-weight: 500;
+    padding: 12px 16px; text-align: left; border-radius: 8px; width: 100%; box-sizing: border-box;
+  }
+  .reaction-btn:hover:not(:disabled) { background: #262b32; border-color: #4fa8d8; }
+  .reaction-btn.active { border-color: #5fbf8f; background: #16241d; color: #5fbf8f; }
+
+  details { margin-bottom: 4px; border-bottom: 1px solid #2a2e35; }
+  details:last-child { border-bottom: none; }
+  summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #4fa8d8; padding: 10px 0; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸ '; }
+  details[open] summary::before { content: '▾ '; }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+  .toggle-row input { width: 18px; height: 18px; cursor: pointer; }
+  .toggle-note { font-size: 12px; color: #9ba0a8; margin-top: 6px; }
+
+  .gift-row { display: flex; gap: 8px; align-items: center; }
+  .gift-row select, .gift-row input {
+    background: #14161a; border: 1px solid #2a2e35; color: #edeef0; padding: 8px 10px;
+    border-radius: 6px; font-family: ui-monospace, monospace; font-size: 14px;
+  }
+  .gift-row input { width: 80px; }
+  .gift-row button { padding: 10px 16px; font-size: 14px; }
+
+  #roster { font-size: 13px; }
+  .roster-row {
+    display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2e35;
+    font-family: ui-monospace, monospace; gap: 12px;
+  }
+  .roster-row:last-child { border-bottom: none; }
+  .roster-stats { color: #9ba0a8; white-space: nowrap; }
+  .empty-note { color: #9ba0a8; font-size: 13px; }
+
+  .record-block { margin-bottom: 18px; }
+  .record-block strong { font-size: 13px; display: block; margin-bottom: 6px; }
+
+  .danger-zone { border-color: #3a2420; }
+  .danger-btn {
+    background: none; border: 1px solid #d9463c; color: #d9463c; font-size: 14px; font-weight: 600;
+    padding: 10px 18px; border-radius: 8px; width: 100%;
+  }
+  .danger-btn:hover { background: rgba(217, 70, 60, 0.1); }
+  .danger-note { font-size: 12px; color: #9ba0a8; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="loginScreen">
+  <h1>Teacher control panel</h1>
+  <div class="status">Sign in to continue</div>
+  <div class="section" style="text-align:left;">
+    <div class="section-label">Teacher sign-in</div>
+    <input type="email" id="loginEmail" placeholder="Email" autocomplete="username">
+    <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn" style="width:100%;">Sign in</button>
+    <div class="danger-note" id="loginError" style="min-height:16px;"></div>
+  </div>
+</div>
+
+<div class="wrap" id="appWrap" style="display:none;">
+  <h1>Teacher control panel</h1>
+  <div class="status" id="status">Connecting to database...</div>
+  <button class="reset" id="logoutBtn" style="margin-bottom:16px;">Sign out</button>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="main">Main</button>
+    <button class="tab-btn" data-tab="library">Library</button>
+    <button class="tab-btn" data-tab="students">Students</button>
+    <button class="tab-btn" data-tab="records">Records</button>
+  </div>
+
+  <div class="tab-panel" data-panel="main">
+    <div class="section">
+      <div class="section-label">Session state</div>
+      <button id="pauseToggleBtn">Pause game</button>
+      <div class="toggle-note">Disables Run, Buy, and Sell for every student until resumed. Unlocking reactions, gifting, and End Session still work while paused.</div>
+    </div>
+
+    <div class="section">
+      <div class="round-label">Current round</div>
+      <div class="round-number" id="roundNumber">—</div>
+      <div class="round-controls">
+        <button id="advanceBtn">Advance round (+1)</button>
+        <button class="reset" id="resetBtn">Reset round to 0</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Bonus question</div>
+      <label class="toggle-row">
+        <input type="checkbox" id="bonusToggle" checked>
+        <span>Optional bonus question enabled</span>
+      </label>
+      <div class="toggle-note">Shown on the confirm screen when a student runs a reaction.</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Gift to all students</div>
+      <div class="gift-row">
+        <select id="giftType"><option value="heat">Heat</option></select>
+        <input type="number" id="giftAmount" step="any" value="5" placeholder="Amount">
+        <button id="giftBtn">Give to all</button>
+      </div>
+      <div class="toggle-note" id="giftStatus">Adds to every joined student's heat or inventory -- doesn't touch anything else.</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">End session</div>
+      <button id="endSessionBtn">Pay out rewards</button>
+      <div class="toggle-note" id="endSessionStatus">Reads current class records: pays 1st/2nd/3rd for each common goal, and the record holder(s) for each hidden quest. Doesn't reset anything -- safe to run mid-session to check standings, though it will pay out again for whoever's still leading.</div>
+      <div id="endSessionSummary"></div>
+    </div>
+
+    <div class="section danger-zone">
+      <div class="section-label">Start a new class</div>
+      <button class="danger-btn" id="resetAllBtn">Reset everything</button>
+      <div class="danger-note">Clears every student, the reaction library, the round counter, and all class records. Use this before a new class period, not mid-session.</div>
+    </div>
+  </div>
+
+  <div class="tab-panel" data-panel="library" style="display:none;">
+    <div class="section">
+      <div class="section-label">Reaction library</div>
+      <div class="current-reaction" id="libraryStatus">No reactions unlocked yet</div>
+      <div id="reactionButtons"></div>
+    </div>
+  </div>
+
+  <div class="tab-panel" data-panel="students" style="display:none;">
+    <div class="section">
+      <div class="section-label">Students joined</div>
+      <div id="roster"><div class="empty-note">No students yet</div></div>
+    </div>
+  </div>
+
+  <div class="tab-panel" data-panel="records" style="display:none;">
+    <div class="section">
+      <div id="recordsContent"></div>
+    </div>
+  </div>
+</div>
+
+  <script type="module">
+    import { db, auth } from './firebase-config.js';
+    import { ref, onValue, get, set, update } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
+    import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
+    import { REACTIONS, PRICES, equationString } from './reactions.js';
+    import { COMMON_GOALS, HIDDEN_GOALS } from './goals.js';
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const errEl = document.getElementById('loginError');
+      if (!email || !password) { errEl.textContent = 'Enter both email and password.'; return; }
+      errEl.textContent = '';
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (e) {
+        errEl.textContent = 'Sign-in failed -- check your email and password.';
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => signOut(auth));
+
+    let initialized = false;
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appWrap').style.display = 'block';
+        if (!initialized) {
+          initialized = true;
+          initTeacherPanel();
+        }
+      } else {
+        document.getElementById('loginScreen').style.display = 'block';
+        document.getElementById('appWrap').style.display = 'none';
+      }
+    });
+
+    function initTeacherPanel() {
+    const roundRef = ref(db, 'round');
+    const libraryRef = ref(db, 'library');
+    const studentsRef = ref(db, 'students');
+    const classRecordsRef = ref(db, 'classRecords');
+    const bonusEnabledRef = ref(db, 'settings/bonusEnabled');
+    const pausedRef = ref(db, 'settings/paused');
+    let connected = false;
+    let studentsData = {};
+    let classRecords = {};
+
+    // --- Tabs ---
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.tab-panel').forEach((p) => {
+          p.style.display = (p.dataset.panel === btn.dataset.tab) ? 'block' : 'none';
+        });
+      });
+    });
+
+    // --- Reaction library, grouped into collapsible tiers ---
+    const tierGroups = {};
+    REACTIONS.forEach((r) => {
+      const tier = r.name.split(' ')[1].split('.')[0];
+      if (!tierGroups[tier]) tierGroups[tier] = [];
+      tierGroups[tier].push(r);
+    });
+    const tierKeys = Object.keys(tierGroups).sort((a, b) => Number(a) - Number(b));
+    const reactionButtonsEl = document.getElementById('reactionButtons');
+    reactionButtonsEl.innerHTML = tierKeys.map((tier, idx) =>
+      '<details' + (idx === 0 ? ' open' : '') + '><summary>Tier ' + tier + ' (' + tierGroups[tier].length + ')</summary>' +
+      '<div class="reaction-buttons" data-tier="' + tier + '"></div></details>'
+    ).join('');
+    REACTIONS.forEach((reaction) => {
+      const tier = reaction.name.split(' ')[1].split('.')[0];
+      const container = reactionButtonsEl.querySelector('.reaction-buttons[data-tier="' + tier + '"]');
+      const btn = document.createElement('button');
+      btn.className = 'reaction-btn';
+      btn.dataset.id = reaction.id;
+      btn.dataset.baseLabel = reaction.name + ' — ' + equationString(reaction);
+      btn.textContent = btn.dataset.baseLabel;
+      btn.addEventListener('click', async () => {
+        await set(ref(db, 'library/' + reaction.id), true);
+      });
+      container.appendChild(btn);
+    });
+
+    onValue(roundRef, (snapshot) => {
+      const value = snapshot.val();
+      document.getElementById('roundNumber').textContent = (value === null ? 0 : value);
+      if (!connected) {
+        connected = true;
+        document.getElementById('status').textContent = 'Connected';
+      }
+    });
+
+    onValue(libraryRef, (snapshot) => {
+      const lib = snapshot.val() || {};
+      const unlockedNames = REACTIONS.filter((r) => lib[r.id]).map((r) => r.name);
+      document.getElementById('libraryStatus').textContent =
+        unlockedNames.length === 0 ? 'No reactions unlocked yet' : 'Unlocked: ' + unlockedNames.join(', ');
+      document.querySelectorAll('.reaction-btn').forEach((btn) => {
+        const isUnlocked = !!lib[btn.dataset.id];
+        btn.classList.toggle('active', isUnlocked);
+        btn.disabled = isUnlocked;
+        btn.textContent = (isUnlocked ? '✓ ' : '') + btn.dataset.baseLabel;
+      });
+    });
+
+    onValue(bonusEnabledRef, (snapshot) => {
+      document.getElementById('bonusToggle').checked = snapshot.val() !== false;
+    });
+    document.getElementById('bonusToggle').addEventListener('change', (e) => {
+      set(bonusEnabledRef, e.target.checked);
+    });
+
+    let isPaused = false;
+    onValue(pausedRef, (snapshot) => {
+      isPaused = snapshot.val() === true;
+      const btn = document.getElementById('pauseToggleBtn');
+      btn.textContent = isPaused ? 'Resume game' : 'Pause game';
+      btn.classList.toggle('paused-active', isPaused);
+    });
+    document.getElementById('pauseToggleBtn').addEventListener('click', () => {
+      set(pausedRef, !isPaused);
+    });
+
+    const giftTypeEl = document.getElementById('giftType');
+    Object.keys(PRICES).forEach((letter) => {
+      const opt = document.createElement('option');
+      opt.value = letter;
+      opt.textContent = letter;
+      giftTypeEl.appendChild(opt);
+    });
+    document.getElementById('giftBtn').addEventListener('click', async () => {
+      const type = giftTypeEl.value;
+      const amount = parseFloat(document.getElementById('giftAmount').value);
+      const statusEl = document.getElementById('giftStatus');
+      if (isNaN(amount) || amount <= 0) { statusEl.textContent = 'Enter a positive amount first.'; return; }
+      const snapshot = await get(studentsRef);
+      const students = snapshot.val() || {};
+      const keys = Object.keys(students);
+      if (keys.length === 0) { statusEl.textContent = 'No students have joined yet.'; return; }
+      const updates = {};
+      keys.forEach((key) => {
+        if (type === 'heat') {
+          updates['students/' + key + '/heat'] = (students[key].heat || 0) + amount;
+        } else {
+          const current = (students[key].inventory && students[key].inventory[type]) || 0;
+          updates['students/' + key + '/inventory/' + type] = current + amount;
+        }
+      });
+      await update(ref(db), updates);
+      statusEl.textContent = 'Gave ' + amount + ' ' + type + ' to ' + keys.length + ' student(s).';
+    });
+
+    onValue(studentsRef, (snapshot) => {
+      studentsData = snapshot.val() || {};
+      const entries = Object.values(studentsData);
+      const rosterEl = document.getElementById('roster');
+      if (entries.length === 0) {
+        rosterEl.innerHTML = '<div class="empty-note">No students yet</div>';
+      } else {
+        entries.sort((a, b) => (b.heat || 0) - (a.heat || 0));
+        rosterEl.innerHTML = entries.map((s) =>
+          '<div class="roster-row"><span>' + s.name + '</span><span class="roster-stats">' +
+          (s.heat || 0).toFixed(2) + ' heat</span></div>'
+        ).join('');
+      }
+      renderRecordsTab();
+    });
+
+    onValue(classRecordsRef, (snapshot) => {
+      classRecords = snapshot.val() || {};
+      renderRecordsTab();
+    });
+
+    function nameFor(studentKey) {
+      return (studentsData[studentKey] && studentsData[studentKey].name) || studentKey;
+    }
+
+    function renderRecordsTab() {
+      const el = document.getElementById('recordsContent');
+      let html = '<div class="section-label">Common goals</div>';
+      html += COMMON_GOALS.map((g) => {
+        const rec = classRecords['commonGoal_' + g.id];
+        const top = (rec && rec.top) || [];
+        const places = [
+          ['1st', g.rewards.first], ['2nd', g.rewards.second], ['3rd', g.rewards.third]
+        ];
+        const rows = places.map((place, i) => {
+          const entry = top[i];
+          const label = entry ? (place[0] + ': ' + nameFor(entry.studentKey)) : (place[0] + ': --');
+          const value = entry ? entry.value.toFixed(2) : '--';
+          return '<div class="roster-row"><span>' + label + '</span><span class="roster-stats">' + value + ' (+' + place[1] + ')</span></div>';
+        }).join('');
+        return '<div class="record-block"><strong>' + g.label + '</strong>' + rows + '</div>';
+      }).join('');
+
+      html += '<div class="section-label" style="margin-top:4px;">Hidden quest records</div>';
+      html += HIDDEN_GOALS.map((hg) => {
+        const rec = classRecords[hg.recordKey];
+        const holders = (rec && rec.holders) || [];
+        const names = holders.length ? holders.map(nameFor).join(', ') : 'No one yet';
+        const value = rec ? rec.value.toFixed(2) : '0.00';
+        return '<div class="record-block"><strong>' + hg.label + '</strong>' +
+          '<div class="roster-row"><span>' + names + '</span><span class="roster-stats">' + value + ' (+' + hg.reward + ')</span></div></div>';
+      }).join('');
+
+      el.innerHTML = html;
+    }
+
+    document.getElementById('advanceBtn').addEventListener('click', () => {
+      get(roundRef).then((snapshot) => {
+        const current = snapshot.val() || 0;
+        set(roundRef, current + 1);
+      });
+    });
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      set(roundRef, 0);
+    });
+
+    document.getElementById('endSessionBtn').addEventListener('click', async () => {
+      const sure = confirm('This pays out heat to the current record-holders for every common goal and hidden quest. It does not reset anything. Continue?');
+      if (!sure) return;
+
+      const recordsSnap = await get(classRecordsRef);
+      const records = recordsSnap.val() || {};
+      const studentsSnap = await get(studentsRef);
+      const students = studentsSnap.val() || {};
+
+      const payoutTotals = {};
+      const payoutDetails = {};
+      function addPayout(studentKey, amount, reason) {
+        payoutTotals[studentKey] = (payoutTotals[studentKey] || 0) + amount;
+        if (!payoutDetails[studentKey]) payoutDetails[studentKey] = [];
+        payoutDetails[studentKey].push(reason + ': +' + amount);
+      }
+
+      COMMON_GOALS.forEach((g) => {
+        const rec = records['commonGoal_' + g.id];
+        const top = (rec && rec.top) || [];
+        if (top[0]) addPayout(top[0].studentKey, g.rewards.first, g.label + ' 1st');
+        if (top[1]) addPayout(top[1].studentKey, g.rewards.second, g.label + ' 2nd');
+        if (top[2]) addPayout(top[2].studentKey, g.rewards.third, g.label + ' 3rd');
+      });
+
+      HIDDEN_GOALS.forEach((hg) => {
+        const rec = records[hg.recordKey];
+        const holders = (rec && rec.holders) || [];
+        holders.forEach((studentKey) => {
+          const student = students[studentKey];
+          if (student && student.hiddenGoalId === hg.id) {
+            addPayout(studentKey, hg.reward, hg.label);
+          }
+        });
+      });
+
+      const statusEl = document.getElementById('endSessionStatus');
+      const summaryEl = document.getElementById('endSessionSummary');
+      const payoutKeys = Object.keys(payoutTotals);
+      if (payoutKeys.length === 0) {
+        statusEl.textContent = 'No records to pay out yet -- nobody has qualified for anything.';
+        summaryEl.innerHTML = '';
+        return;
+      }
+
+      const updates = {};
+      payoutKeys.forEach((studentKey) => {
+        const current = (students[studentKey] && students[studentKey].heat) || 0;
+        updates['students/' + studentKey + '/heat'] = current + payoutTotals[studentKey];
+      });
+      await update(ref(db), updates);
+
+      statusEl.textContent = 'Paid out to ' + payoutKeys.length + ' student(s).';
+      summaryEl.innerHTML = payoutKeys.map((studentKey) =>
+        '<div class="roster-row"><span>' + nameFor(studentKey) + '</span><span class="roster-stats">+' +
+        payoutTotals[studentKey].toFixed(2) + ' (' + payoutDetails[studentKey].join(', ') + ')</span></div>'
+      ).join('');
+    });
+
+    document.getElementById('resetAllBtn').addEventListener('click', async () => {
+      const sure = confirm('This clears all students, the reaction library, the round counter, and all class records, and sends every currently-open student page back to its join screen. This cannot be undone. Continue?');
+      if (!sure) return;
+      await set(roundRef, 0);
+      await set(libraryRef, null);
+      await set(studentsRef, null);
+      await set(classRecordsRef, null);
+      await set(pausedRef, false);
+      await set(ref(db, 'sessionId'), Date.now());
+    });
+    } // end initTeacherPanel
+  </script>
+</body>
+</html>
