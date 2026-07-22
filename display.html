@@ -185,7 +185,7 @@
     import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
     import { COMMON_GOALS } from './goals.js';
     import { REACTIONS } from './reactions.js';
-    import { computeBoundaryTransition, liveRemainingSeconds, tierOf, yieldFromPressure, BASE_YIELD, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
+    import { computeBoundaryTransition, liveRemainingSeconds, tierOf, yieldFromPressure, safePressure, BASE_YIELD, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
 
     let studentsData = {};
     let classRecords = {};
@@ -304,9 +304,9 @@
 
       el.innerHTML = [1, 2, 3].map((tier) => {
         const tiles = byTier[tier].map((reaction) => {
-          const p = pressures[reaction.id] || { pressure: 0, previousPressure: 0 };
-          const pct = yieldFromPressure(p.pressure);
-          const prevPct = yieldFromPressure(p.previousPressure ?? p.pressure);
+          const p = pressures[reaction.id] || {};
+          const pct = yieldFromPressure(safePressure(p));
+          const prevPct = yieldFromPressure((typeof p.previousPressure === 'number' && !Number.isNaN(p.previousPressure)) ? p.previousPressure : safePressure(p));
           const [r, g, b] = yieldColor(pct);
           const intensity = Math.max(0, Math.min(1, (pct - 50) / 50));
           const blur = Math.round(lerp(4, 26, intensity));

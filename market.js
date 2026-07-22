@@ -76,18 +76,28 @@ export function nextPressure(oldPressure, extentThisInterval, effectiveIncrement
   return clampPressure(oldPressure - decayPerMinute * intervalMinutes + activityEffect);
 }
 
+// Reads .pressure safely -- an entry can exist with ONLY
+// extentThisInterval set (created the instant a reaction is first run,
+// before any boundary transition has ever processed it), with no
+// pressure field at all. Reading that as-is produces NaN, which Firebase
+// then rejects outright when a transaction tries to write it.
+export function safePressure(stored) {
+  return (stored && typeof stored.pressure === 'number' && !Number.isNaN(stored.pressure)) ? stored.pressure : 0;
+}
+
 // Runs the boundary computation for every reaction at once. Pure/sync --
 // safe to call directly inside a transaction callback.
 export function advanceAllPressures(currentPressures, reactions, marketParams) {
   const result = {};
   reactions.forEach((reaction) => {
-    const p = (currentPressures && currentPressures[reaction.id]) || { pressure: 0, extentThisInterval: 0 };
+    const p = (currentPressures && currentPressures[reaction.id]) || {};
+    const oldPressure = safePressure(p);
     const tierMult = (marketParams.tierMultipliers && marketParams.tierMultipliers[tierOf(reaction)]) || 1;
     const effectiveIncrement = marketParams.runPressureIncrement * tierMult;
     result[reaction.id] = {
-      pressure: nextPressure(p.pressure, p.extentThisInterval || 0, effectiveIncrement, marketParams.decayPerMinute, marketParams.intervalMinutes),
+      pressure: nextPressure(oldPressure, p.extentThisInterval || 0, effectiveIncrement, marketParams.decayPerMinute, marketParams.intervalMinutes),
       extentThisInterval: 0,
-      previousPressure: p.pressure
+      previousPressure: oldPressure
     };
   });
   return result;
@@ -101,8 +111,8 @@ export function applyRandomShock(pressures, reactions) {
   const result = { ...pressures };
   shuffled.forEach((reaction) => {
     const shockAmount = Math.random() * 30 - 15;
-    const current = result[reaction.id] || { pressure: 0, extentThisInterval: 0 };
-    result[reaction.id] = { ...current, pressure: clampPressure(current.pressure + shockAmount) };
+    const current = result[reaction.id] || {};
+    result[reaction.id] = { ...current, pressure: clampPressure(safePressure(current) + shockAmount) };
   });
   return result;
 }
