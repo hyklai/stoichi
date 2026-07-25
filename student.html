@@ -38,6 +38,9 @@
   .wasted-number { color: #d9463c; }
   #joinForm { max-width: 320px; margin: 60px auto 0; }
   #gameView { max-width: 440px; margin: 0 auto; }
+  #gameView.wide-layout { max-width: 900px; }
+  .tab-panels-wrap.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .tab-panels-wrap.two-col .tab-panel { margin-bottom: 0; }
   .hint { font-size: 13px; color: #9ba0a8; }
   .panel { background: #1e2126; border: 1px solid #2a2e35; border-radius: 10px; padding: 16px; margin-bottom: 16px; text-align: left; }
   .panel-label { font-size: 12px; color: #9ba0a8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
@@ -124,13 +127,8 @@
     </div>
 
     <div id="mainScreen" style="display:none;">
-      <div class="tab-bar">
-        <button class="tab-btn active" data-tab="library">Library</button>
-        <button class="tab-btn" data-tab="inventory">Inv</button>
-        <button class="tab-btn" data-tab="buy">Buy</button>
-        <button class="tab-btn" data-tab="sell">Sell</button>
-        <button class="tab-btn" data-tab="goals">Goals</button>
-      </div>
+      <div class="tab-bar" id="tabBar"></div>
+      <div class="tab-panels-wrap" id="tabPanelsWrap">
       <div class="tab-panel panel" data-panel="library">
         <div class="panel-label">Reaction library</div>
         <div id="libraryPanel"></div>
@@ -149,6 +147,7 @@
       </div>
       <div class="tab-panel panel" data-panel="goals" style="display:none;">
         <div id="goalsContent"></div>
+      </div>
       </div>
     </div>
 
@@ -489,17 +488,72 @@
     }
 
     // --- Tabs ---
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-    });
-    function switchTab(tabName) {
-      document.querySelectorAll('.tab-btn').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.tab === tabName);
-      });
-      document.querySelectorAll('.tab-panel').forEach((panel) => {
-        panel.style.display = (panel.dataset.panel === tabName) ? 'block' : 'none';
+    // Narrow (phones, tablets in portrait): exactly the original behavior,
+    // one panel visible at a time, 5 separate buttons. Wide (tablets in
+    // landscape and up, ~860px+): 3 combined buttons, each showing 2
+    // panels side by side via the two-col grid class. The breakpoint is
+    // chosen so 2 panels at a reasonable ~400px each, plus gap and body
+    // padding, actually fit without feeling cramped -- tablet portrait
+    // (~768-834px) stays single-column on purpose, tablet landscape
+    // (~1024px+) and PCs get the 2-up layout.
+    const TAB_GROUPS_NARROW = [
+      { label: 'Library', panels: ['library'] },
+      { label: 'Inv', panels: ['inventory'] },
+      { label: 'Buy', panels: ['buy'] },
+      { label: 'Sell', panels: ['sell'] },
+      { label: 'Goals', panels: ['goals'] }
+    ];
+    const TAB_GROUPS_WIDE = [
+      { label: 'Library & Inventory', panels: ['library', 'inventory'] },
+      { label: 'Buy & Sell', panels: ['buy', 'sell'] },
+      { label: 'Goals', panels: ['goals'] }
+    ];
+    const wideLayoutQuery = window.matchMedia('(min-width: 860px)');
+    function isWideLayout() { return wideLayoutQuery.matches; }
+    function currentTabGroups() { return isWideLayout() ? TAB_GROUPS_WIDE : TAB_GROUPS_NARROW; }
+    function findGroupContaining(panelName) {
+      return currentTabGroups().find((g) => g.panels.includes(panelName)) || currentTabGroups()[0];
+    }
+
+    let activePanelName = 'library';
+
+    function renderTabBar() {
+      const groups = currentTabGroups();
+      const activeGroup = findGroupContaining(activePanelName);
+      const tabBarEl = document.getElementById('tabBar');
+      tabBarEl.innerHTML = groups.map((g) =>
+        '<button class="tab-btn' + (g === activeGroup ? ' active' : '') + '" data-first-panel="' + g.panels[0] + '">' + g.label + '</button>'
+      ).join('');
+      tabBarEl.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activePanelName = btn.dataset.firstPanel;
+          renderTabBar();
+          applyPanelVisibility();
+        });
       });
     }
+
+    function applyPanelVisibility() {
+      const activeGroup = findGroupContaining(activePanelName);
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.style.display = activeGroup.panels.includes(panel.dataset.panel) ? 'block' : 'none';
+      });
+      document.getElementById('tabPanelsWrap').classList.toggle('two-col', activeGroup.panels.length === 2);
+      document.getElementById('gameView').classList.toggle('wide-layout', isWideLayout());
+    }
+
+    // Only re-renders on an actual narrow<->wide crossing (not every pixel
+    // of a resize), and re-finds the group from the still-stable
+    // activePanelName so a mid-session resize or tablet rotation lands on
+    // the group containing whatever the student was last looking at,
+    // rather than jumping to an unrelated tab.
+    wideLayoutQuery.addEventListener('change', () => {
+      renderTabBar();
+      applyPanelVisibility();
+    });
+
+    renderTabBar();
+    applyPanelVisibility();
 
     function renderMain() {
       if (document.getElementById('mainScreen').style.display === 'none') return;

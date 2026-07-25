@@ -15,6 +15,8 @@
     box-sizing: border-box;
   }
   .wrap { max-width: 480px; margin: 0 auto; text-align: center; }
+  #appWrap.wide-layout { max-width: 920px; }
+  .tab-panels-wrap.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
   input[type="email"], input[type="password"] {
     display: block; width: 100%; box-sizing: border-box; background: #14161a; border: 1px solid #2a2e35;
     color: #edeef0; padding: 12px 14px; border-radius: 8px; font-size: 15px; margin-bottom: 10px;
@@ -182,13 +184,9 @@
   <div class="status" id="status">Connecting to database...</div>
   <button class="reset" id="logoutBtn" style="margin-bottom:16px;">Sign out</button>
 
-  <div class="tab-bar">
-    <button class="tab-btn active" data-tab="main">Main</button>
-    <button class="tab-btn" data-tab="library">Library</button>
-    <button class="tab-btn" data-tab="students">Students</button>
-    <button class="tab-btn" data-tab="records">Records</button>
-  </div>
+  <div class="tab-bar" id="tabBar"></div>
 
+  <div class="tab-panels-wrap" id="tabPanelsWrap">
   <div class="tab-panel" data-panel="main">
     <div class="section" style="text-align:center;">
       <button class="reset" id="editSetupBtn" style="width:100%;">Edit session setup</button>
@@ -268,6 +266,7 @@
       <div id="recordsContent"></div>
     </div>
   </div>
+  </div>
 </div>
 
   <script type="module">
@@ -335,14 +334,60 @@
     let currentMarketParams = { runPressureIncrement: DEFAULT_RUN_PRESSURE_INCREMENT, decayPerMinute: DEFAULT_PRESSURE_DECAY_PER_MINUTE, intervalMinutes: DEFAULT_INTERVAL_MINUTES, tierMultipliers: DEFAULT_TIER_MULTIPLIERS };
 
     // --- Tabs ---
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
-        document.querySelectorAll('.tab-panel').forEach((p) => {
-          p.style.display = (p.dataset.panel === btn.dataset.tab) ? 'block' : 'none';
+    // Same approach as student.html: narrow mode is the exact original
+    // 4-separate-tabs behavior; wide mode (tablet landscape and up)
+    // combines into 2 buttons showing 2 panels side by side.
+    const TAB_GROUPS_NARROW = [
+      { label: 'Main', panels: ['main'] },
+      { label: 'Library', panels: ['library'] },
+      { label: 'Students', panels: ['students'] },
+      { label: 'Records', panels: ['records'] }
+    ];
+    const TAB_GROUPS_WIDE = [
+      { label: 'Main & Library', panels: ['main', 'library'] },
+      { label: 'Students & Records', panels: ['students', 'records'] }
+    ];
+    const wideLayoutQuery = window.matchMedia('(min-width: 860px)');
+    function isWideLayout() { return wideLayoutQuery.matches; }
+    function currentTabGroups() { return isWideLayout() ? TAB_GROUPS_WIDE : TAB_GROUPS_NARROW; }
+    function findGroupContaining(panelName) {
+      return currentTabGroups().find((g) => g.panels.includes(panelName)) || currentTabGroups()[0];
+    }
+
+    let activePanelName = 'main';
+
+    function renderTabBar() {
+      const groups = currentTabGroups();
+      const activeGroup = findGroupContaining(activePanelName);
+      const tabBarEl = document.getElementById('tabBar');
+      tabBarEl.innerHTML = groups.map((g) =>
+        '<button class="tab-btn' + (g === activeGroup ? ' active' : '') + '" data-first-panel="' + g.panels[0] + '">' + g.label + '</button>'
+      ).join('');
+      tabBarEl.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activePanelName = btn.dataset.firstPanel;
+          renderTabBar();
+          applyPanelVisibility();
         });
       });
+    }
+
+    function applyPanelVisibility() {
+      const activeGroup = findGroupContaining(activePanelName);
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.style.display = activeGroup.panels.includes(panel.dataset.panel) ? 'block' : 'none';
+      });
+      document.getElementById('tabPanelsWrap').classList.toggle('two-col', activeGroup.panels.length === 2);
+      document.getElementById('appWrap').classList.toggle('wide-layout', isWideLayout());
+    }
+
+    wideLayoutQuery.addEventListener('change', () => {
+      renderTabBar();
+      applyPanelVisibility();
     });
+
+    renderTabBar();
+    applyPanelVisibility();
 
     // --- Reaction library, grouped into collapsible tiers ---
     const tierGroups = {};
