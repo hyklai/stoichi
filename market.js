@@ -117,47 +117,16 @@ export function applyRandomShock(pressures, reactions) {
   return result;
 }
 
-// How many past intervals to keep in history -- generous for a single
-// class period (a 50-minute session at 2-minute intervals is ~25
-// entries) without growing unbounded across a very long-running page.
-export const MAX_HISTORY_LENGTH = 60;
-
-// Aggregates one boundary's outcome by tier: total extent that just
-// happened (from the OUTGOING extentThisInterval, before it's reset) and
-// the average yield going forward (from the NEW pressures). This is what
-// the display's volume chart reads, one entry per interval, per tier.
-export function computeTierSummary(oldPressures, newPressures, reactions) {
-  const totals = { 1: { extent: 0, yieldSum: 0, count: 0 }, 2: { extent: 0, yieldSum: 0, count: 0 }, 3: { extent: 0, yieldSum: 0, count: 0 } };
-  reactions.forEach((reaction) => {
-    const tier = tierOf(reaction);
-    const old = (oldPressures && oldPressures[reaction.id]) || { extentThisInterval: 0 };
-    const updated = newPressures[reaction.id];
-    totals[tier].extent += old.extentThisInterval || 0;
-    totals[tier].yieldSum += yieldFromPressure(updated.pressure);
-    totals[tier].count += 1;
-  });
-  const result = {};
-  [1, 2, 3].forEach((t) => {
-    result[t] = { extent: totals[t].extent, avgYield: totals[t].count ? totals[t].yieldSum / totals[t].count : BASE_YIELD };
-  });
-  return result;
-}
-
-// The complete boundary transition: new pressures, a fresh timer, and one
-// new history entry appended (capped at MAX_HISTORY_LENGTH). This is the
-// single source of truth for "an interval just ended" -- every file's
-// transaction callback for the automatic advance-when-due case should
-// just call this directly rather than reimplementing it.
+// The complete boundary transition: new pressures and a fresh timer.
+// This is the single source of truth for "an interval just ended" --
+// every file's transaction callback for the automatic advance-when-due
+// case should just call this directly rather than reimplementing it.
 export function computeBoundaryTransition(current, reactions, marketParams, now) {
   const oldPressures = (current && current.pressures) || {};
   const newPressures = advanceAllPressures(oldPressures, reactions, marketParams);
-  const tierSummary = computeTierSummary(oldPressures, newPressures, reactions);
-  const priorHistory = (current && current.history) || [];
-  const newHistory = [...priorHistory, { timestamp: now, tiers: tierSummary }].slice(-MAX_HISTORY_LENGTH);
   return {
     pressures: newPressures,
-    timer: { remainingSeconds: marketParams.intervalMinutes * 60, checkpointAt: now, running: true },
-    history: newHistory
+    timer: { remainingSeconds: marketParams.intervalMinutes * 60, checkpointAt: now, running: true }
   };
 }
 

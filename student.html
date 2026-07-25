@@ -248,16 +248,18 @@
     // prior entry each time rather than duplicating it.
     async function bumpSingleRecord(key, value) {
       const recRef = ref(db, 'classRecords/' + key);
-      const snap = await get(recRef);
-      const current = snap.val();
-      if (!current || value > current.value) {
-        await set(recRef, { value: value, holders: [studentKey] });
-      } else if (value === current.value) {
-        const holders = current.holders || [];
-        if (!holders.includes(studentKey)) {
-          await set(recRef, { value: current.value, holders: holders.concat([studentKey]) });
+      await runTransaction(recRef, (current) => {
+        if (!current || value > current.value) {
+          return { value: value, holders: [studentKey] };
         }
-      }
+        if (value === current.value) {
+          const holders = current.holders || [];
+          if (!holders.includes(studentKey)) {
+            return { value: current.value, holders: holders.concat([studentKey]) };
+          }
+        }
+        return current;
+      });
     }
     // "Most held" quests track live inventory, which changes on buy,
     // sell, AND run (both sides: reactants consumed, products formed) --
@@ -272,13 +274,14 @@
     }
     async function bumpTop3(key, value, direction) {
       const recRef = ref(db, 'classRecords/' + key);
-      const snap = await get(recRef);
-      let top = (snap.val() && snap.val().top) || [];
-      top = top.filter((e) => e.studentKey !== studentKey);
-      top.push({ studentKey: studentKey, value: value });
-      top.sort((a, b) => direction === 'min' ? a.value - b.value : b.value - a.value);
-      top = top.slice(0, 3);
-      await set(recRef, { top: top });
+      await runTransaction(recRef, (current) => {
+        let top = (current && current.top) || [];
+        top = top.filter((e) => e.studentKey !== studentKey);
+        top.push({ studentKey: studentKey, value: value });
+        top.sort((a, b) => direction === 'min' ? a.value - b.value : b.value - a.value);
+        top = top.slice(0, 3);
+        return { top: top };
+      });
     }
 
     let studentKey = null;
@@ -323,10 +326,14 @@
       document.getElementById('joinForm').style.display = 'none';
       document.getElementById('gameView').style.display = 'block';
       document.getElementById('welcome').textContent = 'Playing as ' + name;
-      watchGameState();
+      watchGlobalState();
+      watchStudentState();
     }
 
-    function watchGameState() {
+    let globalStateWatched = false;
+    function watchGlobalState() {
+      if (globalStateWatched) return;
+      globalStateWatched = true;
       onValue(ref(db, 'sessionId'), (s) => {
         const newId = s.val();
         if (hasSeenSessionId && newId !== sessionId) {
@@ -383,31 +390,49 @@
       }, 1000);
 
       onValue(ref(db, 'settings/paused'), (s) => { paused = s.val() === true; renderMain(); });
-      onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
+    }
+
+    // Student-specific listeners are bound to a fixed 'students/<key>/...'
+    // string at the moment onValue is called -- they do NOT follow later
+    // reassignments of the studentKey variable. So on rejoin (a new name,
+    // a new key), the old listeners must be explicitly detached before
+    // attaching new ones for the new key -- otherwise they'd keep
+    // watching the wrong, stale student forever, on top of whatever new
+    // ones get added. studentUnsubscribers tracks every onValue detach
+    // function from the previous call (including the nested quest-record
+    // listener below) so this can run safely on every join, not just the
+    // first.
+    let studentUnsubscribers = [];
+    function watchStudentState() {
+      studentUnsubscribers.forEach((unsub) => unsub());
+      studentUnsubscribers = [];
+      myQuestRecordListenerSet = false;
+
+      studentUnsubscribers.push(onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
         currentHeat = s.val() ?? DEFAULT_STARTING_HEAT;
         document.getElementById('heatNumber').textContent = currentHeat.toFixed(2);
         renderMain();
-      });
-      onValue(ref(db, 'students/' + studentKey + '/totalWasted'), (s) => {
+      }));
+      studentUnsubscribers.push(onValue(ref(db, 'students/' + studentKey + '/totalWasted'), (s) => {
         currentWasted = s.val() ?? 0;
         document.getElementById('wastedNumber').textContent = currentWasted.toFixed(2);
-      });
-      onValue(ref(db, 'students/' + studentKey + '/inventory'), (s) => { inventory = s.val() || {}; renderMain(); });
-      onValue(ref(db, 'students/' + studentKey), (s) => { stats = s.val() || {}; renderGoalsPanel(); });
-      onValue(ref(db, 'students/' + studentKey + '/hiddenGoalId'), (s) => {
+      }));
+      studentUnsubscribers.push(onValue(ref(db, 'students/' + studentKey + '/inventory'), (s) => { inventory = s.val() || {}; renderMain(); }));
+      studentUnsubscribers.push(onValue(ref(db, 'students/' + studentKey), (s) => { stats = s.val() || {}; renderGoalsPanel(); }));
+      studentUnsubscribers.push(onValue(ref(db, 'students/' + studentKey + '/hiddenGoalId'), (s) => {
         hiddenGoalId = s.val();
         updateTopLevelScreen();
         if (hiddenGoalId && !myQuestRecordListenerSet) {
           myQuestRecordListenerSet = true;
           const hg = HIDDEN_GOALS.find((g) => g.id === hiddenGoalId);
           if (hg && hg.recordKey) {
-            onValue(ref(db, 'classRecords/' + hg.recordKey), (recSnap) => {
+            studentUnsubscribers.push(onValue(ref(db, 'classRecords/' + hg.recordKey), (recSnap) => {
               myQuestClassRecord = recSnap.val();
               renderGoalsPanel();
-            });
+            }));
           }
         }
-      });
+      }));
     }
 
     function forceReturnToJoinForm() {
@@ -477,7 +502,7 @@
     }
 
     function renderMain() {
-      if (!hiddenGoalId || pendingReactionId) return;
+      if (document.getElementById('mainScreen').style.display === 'none') return;
       document.getElementById('bonusFlash').textContent = lastFlash;
       document.getElementById('pausedBanner').style.display = paused ? 'block' : 'none';
       renderGoalsPanel();
@@ -583,7 +608,7 @@
         '</div>';
       }).join('') + '<div class="error-msg" id="buyError"></div>';
       el.querySelectorAll('.buy-btn').forEach((btn) => {
-        btn.addEventListener('click', () => buyLetter(btn.dataset.letter));
+        btn.addEventListener('click', () => buyLetter(btn.dataset.letter, btn));
       });
     }
 
@@ -605,47 +630,59 @@
         '</div>';
       }).join('') + '<div class="error-msg" id="sellError"></div>';
       el.querySelectorAll('.buy-btn').forEach((btn) => {
-        btn.addEventListener('click', () => sellLetter(btn.dataset.letter));
+        btn.addEventListener('click', () => sellLetter(btn.dataset.letter, btn));
       });
     }
 
-    async function buyLetter(letter) {
+    async function buyLetter(letter, btn) {
       const errEl = document.getElementById('buyError');
       if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
-      const typedQty = Math.max(0, parseFloat(document.getElementById('buyQty_' + letter).value) || 0);
-      if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
-      const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
-      const cost = qtyMoles * buyPrice(letter);
-      if (cost > currentHeat) { errEl.textContent = 'Not enough heat for that.'; return; }
-      errEl.textContent = '';
-      const newAmount = (inventory[letter] || 0) + qtyMoles;
-      await update(ref(db, 'students/' + studentKey), {
-        heat: currentHeat - cost,
-        ['inventory/' + letter]: newAmount
-      });
-      await maybeBumpHolding(letter, newAmount);
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const typedQty = Math.max(0, parseFloat(document.getElementById('buyQty_' + letter).value) || 0);
+        if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+        const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
+        const cost = qtyMoles * buyPrice(letter);
+        if (cost > currentHeat) { errEl.textContent = 'Not enough heat for that.'; return; }
+        errEl.textContent = '';
+        const newAmount = (inventory[letter] || 0) + qtyMoles;
+        await update(ref(db, 'students/' + studentKey), {
+          heat: currentHeat - cost,
+          ['inventory/' + letter]: newAmount
+        });
+        await maybeBumpHolding(letter, newAmount);
+      } finally {
+        btn.disabled = false;
+      }
     }
 
-    async function sellLetter(letter) {
+    async function sellLetter(letter, btn) {
       const errEl = document.getElementById('sellError');
       if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
-      const have = inventory[letter] || 0;
-      const haveDisplay = massModeEnabled ? molesToGrams(letter, have) : have;
-      const typedQty = Math.max(0, parseFloat(document.getElementById('sellQty_' + letter).value) || 0);
-      if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
-      if (typedQty > haveDisplay) { errEl.textContent = "You don't have that much " + letter + '.'; return; }
-      errEl.textContent = '';
-      const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
-      const revenue = qtyMoles * PRICES[letter];
-      const newTotalSoldRevenue = (stats.totalSoldRevenue || 0) + revenue;
-      const newAmount = have - qtyMoles;
-      await update(ref(db, 'students/' + studentKey), {
-        heat: currentHeat + revenue,
-        ['inventory/' + letter]: newAmount,
-        totalSoldRevenue: newTotalSoldRevenue
-      });
-      await maybeBumpHolding(letter, newAmount);
-      await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const have = inventory[letter] || 0;
+        const haveDisplay = massModeEnabled ? molesToGrams(letter, have) : have;
+        const typedQty = Math.max(0, parseFloat(document.getElementById('sellQty_' + letter).value) || 0);
+        if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+        if (typedQty > haveDisplay) { errEl.textContent = "You don't have that much " + letter + '.'; return; }
+        errEl.textContent = '';
+        const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
+        const revenue = qtyMoles * PRICES[letter];
+        const newTotalSoldRevenue = (stats.totalSoldRevenue || 0) + revenue;
+        const newAmount = have - qtyMoles;
+        await update(ref(db, 'students/' + studentKey), {
+          heat: currentHeat + revenue,
+          ['inventory/' + letter]: newAmount,
+          totalSoldRevenue: newTotalSoldRevenue
+        });
+        await maybeBumpHolding(letter, newAmount);
+        await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     async function openConfirmScreen(reactionId) {
@@ -759,6 +796,10 @@
         document.getElementById('commitError').textContent = 'Your teacher paused the game -- use Back and wait for it to resume.';
         return;
       }
+      const runBtn = document.getElementById('runConfirmBtn');
+      if (runBtn.disabled) return;
+      runBtn.disabled = true;
+      try {
       const reaction = REACTIONS.find((r) => r.id === pendingReactionId);
       const committed = readCommitted(reaction);
       const allPositive = reaction.reactants.every((r) => committed[r.letter] > 0);
@@ -900,6 +941,9 @@
       }
 
       closeConfirmScreen();
+      } finally {
+        runBtn.disabled = false;
+      }
     });
 
     document.getElementById('backBtn').addEventListener('click', () => {

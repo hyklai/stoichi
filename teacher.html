@@ -279,7 +279,7 @@
     import { DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES, computeBoundaryTransition, applyRandomShock, liveRemainingSeconds } from './market.js';
 
     // Must match the email in your Firebase security rules exactly.
-    const TEACHER_EMAIL = 'YOUR_TEACHER_EMAIL_HERE';
+    const TEACHER_EMAIL = 'hylai1992@gmail.com';
 
     document.getElementById('loginBtn').addEventListener('click', async () => {
       const email = document.getElementById('loginEmail').value.trim();
@@ -440,7 +440,9 @@
     });
     document.getElementById('startingHeatInput').addEventListener('change', (e) => {
       const val = parseFloat(e.target.value);
-      set(startingHeatRef, isNaN(val) ? DEFAULT_STARTING_HEAT : val);
+      const finalVal = (isNaN(val) || val <= 0) ? DEFAULT_STARTING_HEAT : val;
+      e.target.value = finalVal;
+      set(startingHeatRef, finalVal);
     });
 
     onValue(bonusEnabledRef, (snapshot) => {
@@ -461,8 +463,7 @@
       if (e.target.checked && !latestTimer) {
         await set(marketRef, {
           pressures: {},
-          timer: { remainingSeconds: currentMarketParams.intervalMinutes * 60, checkpointAt: Date.now(), running: !isPaused },
-          history: []
+          timer: { remainingSeconds: currentMarketParams.intervalMinutes * 60, checkpointAt: Date.now(), running: !isPaused }
         });
       }
     });
@@ -508,14 +509,22 @@
       document.getElementById('mpTier3').value = currentMarketParams.tierMultipliers[3];
     });
     document.getElementById('mpSaveBtn').addEventListener('click', async () => {
+      function parseNonNegative(elId, fallback) {
+        const v = parseFloat(document.getElementById(elId).value);
+        return (isNaN(v) || v < 0) ? fallback : v;
+      }
+      function parsePositive(elId, fallback) {
+        const v = parseFloat(document.getElementById(elId).value);
+        return (isNaN(v) || v <= 0) ? fallback : v;
+      }
       await set(marketParamsRef, {
-        runPressureIncrement: parseFloat(document.getElementById('mpIncrement').value) || DEFAULT_RUN_PRESSURE_INCREMENT,
-        decayPerMinute: parseFloat(document.getElementById('mpDecay').value) || DEFAULT_PRESSURE_DECAY_PER_MINUTE,
-        intervalMinutes: parseFloat(document.getElementById('mpInterval').value) || DEFAULT_INTERVAL_MINUTES,
+        runPressureIncrement: parseNonNegative('mpIncrement', DEFAULT_RUN_PRESSURE_INCREMENT),
+        decayPerMinute: parseNonNegative('mpDecay', DEFAULT_PRESSURE_DECAY_PER_MINUTE),
+        intervalMinutes: parsePositive('mpInterval', DEFAULT_INTERVAL_MINUTES),
         tierMultipliers: {
-          1: parseFloat(document.getElementById('mpTier1').value) || DEFAULT_TIER_MULTIPLIERS[1],
-          2: parseFloat(document.getElementById('mpTier2').value) || DEFAULT_TIER_MULTIPLIERS[2],
-          3: parseFloat(document.getElementById('mpTier3').value) || DEFAULT_TIER_MULTIPLIERS[3]
+          1: parseNonNegative('mpTier1', DEFAULT_TIER_MULTIPLIERS[1]),
+          2: parseNonNegative('mpTier2', DEFAULT_TIER_MULTIPLIERS[2]),
+          3: parseNonNegative('mpTier3', DEFAULT_TIER_MULTIPLIERS[3])
         }
       });
       document.getElementById('mpStatus').textContent = 'Saved. Interval length applies starting next update; other values apply immediately.';
@@ -629,7 +638,7 @@
       const statusEl = document.getElementById('shockStatus');
       try {
         const result = await runTransaction(marketRef, (current) => {
-          const base = current || { pressures: {}, history: [] };
+          const base = current || { pressures: {} };
           const transitioned = computeBoundaryTransition(base, REACTIONS, currentMarketParams, Date.now());
           transitioned.pressures = applyRandomShock(transitioned.pressures, REACTIONS);
           transitioned.timer.running = !isPaused;
@@ -711,8 +720,7 @@
       await set(ref(db, 'sessionId'), Date.now());
       await set(marketRef, {
         pressures: {},
-        timer: { remainingSeconds: currentMarketParams.intervalMinutes * 60, checkpointAt: Date.now(), running: true },
-        history: []
+        timer: { remainingSeconds: currentMarketParams.intervalMinutes * 60, checkpointAt: Date.now(), running: true }
       });
       showSetupScreen();
     });

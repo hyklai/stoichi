@@ -400,7 +400,3 @@ export function equationString(reaction) {
     .join(' + ');
   return reactantsStr + ' → ' + productsStr;
 }
- 
-export function findReactionById(id) {
-  return REACTIONS.find((r) => r.id === id) || null;
-}
