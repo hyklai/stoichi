@@ -156,6 +156,7 @@
       <div class="panel-label">Confirm reaction</div>
       <div class="hint" id="confirmReactionLabel" style="margin-bottom:10px;"></div>
       <div class="hint" id="confirmYieldLabel" style="display:none; margin-bottom:10px; color:#f4b942; font-weight:600;"></div>
+      <div class="hint" id="confirmMolarMass" style="display:none; margin-bottom:10px; font-family:ui-monospace, monospace;"></div>
       <div id="commitInputs"></div>
       <div class="error-msg" id="commitError"></div>
       <div class="bonus-box" id="bonusBox">
@@ -171,13 +172,14 @@
     import { db, auth } from './firebase-config.js';
     import { ref, onValue, get, set, update, increment, runTransaction } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
     import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
-    import { REACTIONS, PRICES, equationString } from './reactions.js';
+    import { REACTIONS, PRICES, MOLAR_MASS, equationString, gramsToMoles, molesToGrams, pricePerGram } from './reactions.js';
     import { solveReaction } from './stoich.js';
-    import { HIDDEN_GOALS, COMMON_GOALS, COMMON_GOAL_SPECIES } from './goals.js';
+    import { HIDDEN_GOALS, COMMON_GOALS, COMMON_GOAL_SPECIES, computeReward, HOLD_TRACKED_LETTERS } from './goals.js';
     import { yieldFromPressure, computeBoundaryTransition, liveRemainingSeconds, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
 
     // Tunable constants -- edit here.
-    const STARTING_HEAT = 2000;
+    const DEFAULT_STARTING_HEAT = 2000;
+    let currentStartingHeat = DEFAULT_STARTING_HEAT;
     const BUY_MARKUP = 1.2; // 20% markup on buying anything except the two base materials
 
 
@@ -191,10 +193,49 @@
     }
     function pickBonusQuestionType(reaction) {
       const opts = [];
-      if (reaction.reactants.length > 1) opts.push('limiting');
-      reaction.reactants.forEach((r) => opts.push('consumed_' + r.letter));
-      reaction.products.forEach((p) => opts.push('formed_' + p.letter));
+      if (reaction.reactants.length > 1) opts.push({ kind: 'limiting' });
+      const yieldTypes = yieldFluctuationEnabled ? ['actual', 'theoretical'] : [null];
+      const unitTypes = massModeEnabled ? ['mole', 'mass'] : ['mole'];
+      reaction.reactants.forEach((r) => {
+        yieldTypes.forEach((yt) => {
+          unitTypes.forEach((ut) => {
+            opts.push({ kind: 'consumed', letter: r.letter, yieldType: yt, unitType: ut });
+          });
+        });
+      });
+      reaction.products.forEach((p) => {
+        yieldTypes.forEach((yt) => {
+          unitTypes.forEach((ut) => {
+            opts.push({ kind: 'formed', letter: p.letter, yieldType: yt, unitType: ut });
+          });
+        });
+      });
       return opts[Math.floor(Math.random() * opts.length)];
+    }
+
+    // Builds the question text from a structured {kind, letter, yieldType,
+    // unitType} object -- not called for kind:'limiting', which has its
+    // own dropdown UI instead of a numeric label.
+    function bonusQuestionLabel(q) {
+      const unitCap = q.unitType === 'mass' ? 'Grams' : 'Moles';
+      const unitLower = q.unitType === 'mass' ? 'grams' : 'moles';
+      if (q.kind === 'formed') {
+        if (q.yieldType === 'actual') {
+          return 'Actual yield -- ' + unitLower + ' of ' + q.letter + ' that will actually form, accounting for the current percent yield?';
+        }
+        if (q.yieldType === 'theoretical') {
+          return 'Theoretical yield -- ' + unitLower + ' of ' + q.letter + ' that would form if this reaction went to 100% completion?';
+        }
+        return unitCap + ' of ' + q.letter + ' that will form?';
+      }
+      // kind === 'consumed'
+      if (q.yieldType === 'actual') {
+        return unitCap + ' of ' + q.letter + ' that will actually be consumed, accounting for the current percent yield?';
+      }
+      if (q.yieldType === 'theoretical') {
+        return unitCap + ' of ' + q.letter + ' that would be consumed if this reaction went to 100% completion?';
+      }
+      return unitCap + ' of ' + q.letter + ' that will be consumed?';
     }
     function buyPrice(letter) {
       return PRICES[letter] * (letter === 'A' || letter === 'B' ? 1 : BUY_MARKUP);
@@ -218,6 +259,17 @@
         }
       }
     }
+    // "Most held" quests track live inventory, which changes on buy,
+    // sell, AND run (both sides: reactants consumed, products formed) --
+    // unlike produce-X quests, which only ever update from running a
+    // reaction. This no-ops silently for any letter not in the tracked
+    // list, so every call site can just call it unconditionally.
+    function maybeBumpHolding(letter, newAmount) {
+      if (HOLD_TRACKED_LETTERS.includes(letter)) {
+        return bumpSingleRecord('holding_' + letter, newAmount);
+      }
+      return Promise.resolve();
+    }
     async function bumpTop3(key, value, direction) {
       const recRef = ref(db, 'classRecords/' + key);
       const snap = await get(recRef);
@@ -230,7 +282,7 @@
     }
 
     let studentKey = null;
-    let currentHeat = STARTING_HEAT;
+    let currentHeat = DEFAULT_STARTING_HEAT;
     let currentWasted = 0;
     let inventory = {};
     let library = {};
@@ -240,6 +292,8 @@
     let hasSeenSessionId = false;
     let bonusEnabled = true;
     let yieldFluctuationEnabled = false;
+    let hiddenQuestsEnabled = true;
+    let massModeEnabled = false;
     let marketPressures = {};
     let marketParams = { runPressureIncrement: DEFAULT_RUN_PRESSURE_INCREMENT, decayPerMinute: DEFAULT_PRESSURE_DECAY_PER_MINUTE, intervalMinutes: DEFAULT_INTERVAL_MINUTES, tierMultipliers: DEFAULT_TIER_MULTIPLIERS };
     let pendingPercentYield = 100;
@@ -247,7 +301,7 @@
     let myQuestRecordListenerSet = false;
     let offeredQuests = [];
     let pendingReactionId = null;
-    let pendingQuestionType = null;
+    let pendingBonusQuestion = null;
     let lastFlash = '';
     let stats = {};
 
@@ -256,8 +310,10 @@
       const studentRef = ref(db, 'students/' + studentKey);
       const snap = await get(studentRef);
       if (!snap.exists()) {
+        const startingHeatSnap = await get(ref(db, 'settings/startingHeat'));
+        const startingHeat = startingHeatSnap.val() ?? DEFAULT_STARTING_HEAT;
         await set(studentRef, {
-          name, heat: STARTING_HEAT, totalWasted: 0, inventory: {},
+          name, heat: startingHeat, totalWasted: 0, inventory: {},
           totalProducedBySpecies: {}, bestSingleRunYield: 0, bonusCorrectCount: 0, totalSoldRevenue: 0,
           hiddenGoalId: null,
           ownerId: auth.currentUser.uid
@@ -288,6 +344,13 @@
       onValue(ref(db, 'market/pressures'), (s) => { marketPressures = s.val() || {}; renderMain(); });
       onValue(ref(db, 'settings/bonusEnabled'), (s) => { bonusEnabled = s.val() !== false; });
       onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; renderCountdown(); renderMain(); });
+      onValue(ref(db, 'settings/hiddenQuestsEnabled'), (s) => { hiddenQuestsEnabled = s.val() !== false; updateTopLevelScreen(); });
+      onValue(ref(db, 'settings/startingHeat'), (s) => {
+        currentStartingHeat = s.val() ?? DEFAULT_STARTING_HEAT;
+        renderQuestSelectScreen();
+        renderMain();
+      });
+      onValue(ref(db, 'settings/massModeEnabled'), (s) => { massModeEnabled = s.val() === true; renderMain(); });
       onValue(ref(db, 'settings/marketParams'), (s) => {
         const mp = s.val();
         if (mp) marketParams = mp;
@@ -321,7 +384,7 @@
 
       onValue(ref(db, 'settings/paused'), (s) => { paused = s.val() === true; renderMain(); });
       onValue(ref(db, 'students/' + studentKey + '/heat'), (s) => {
-        currentHeat = s.val() ?? STARTING_HEAT;
+        currentHeat = s.val() ?? DEFAULT_STARTING_HEAT;
         document.getElementById('heatNumber').textContent = currentHeat.toFixed(2);
         renderMain();
       });
@@ -362,7 +425,7 @@
 
     // --- Top-level screen switching: quest select -> main <-> confirm ---
     function updateTopLevelScreen() {
-      if (!hiddenGoalId) {
+      if (hiddenQuestsEnabled && !hiddenGoalId) {
         showTopLevel('questSelectScreen');
         renderQuestSelectScreen();
       } else if (pendingReactionId) {
@@ -388,7 +451,7 @@
       const el = document.getElementById('questOptions');
       el.innerHTML = offeredQuests.map((q) =>
         '<div class="quest-card"><div class="quest-label">' + q.label + '</div>' +
-        '<div class="quest-reward">Reward: +' + q.reward + ' heat</div>' +
+        '<div class="quest-reward">Reward: +' + computeReward(q.rewardProportion, currentStartingHeat) + ' heat</div>' +
         '<button data-id="' + q.id + '" class="quest-choose-btn">Choose this quest</button></div>'
       ).join('');
       el.querySelectorAll('.quest-choose-btn').forEach((btn) => {
@@ -428,14 +491,16 @@
       let html = '<div class="panel-label">Common goals -- rewarded at the end</div>' +
         COMMON_GOALS.map((g) =>
           '<div class="goal-row"><span>' + g.label + '</span><span>' + g.getValue(stats).toFixed(2) + '</span></div>' +
-          '<div class="reward-line">1st: +' + g.rewards.first + ' heat &middot; 2nd: +' + g.rewards.second + ' heat &middot; 3rd: +' + g.rewards.third + ' heat</div>'
+          '<div class="reward-line">1st: +' + computeReward(g.rewardProportions.first, currentStartingHeat) + ' heat &middot; 2nd: +' + computeReward(g.rewardProportions.second, currentStartingHeat) + ' heat &middot; 3rd: +' + computeReward(g.rewardProportions.third, currentStartingHeat) + ' heat</div>'
         ).join('');
       const hg = HIDDEN_GOALS.find((g) => g.id === hiddenGoalId);
-      html += '<div class="panel-label" style="margin-top:18px;">Your hidden quest</div>';
-      if (hg) {
-        const classBest = myQuestClassRecord ? myQuestClassRecord.value.toFixed(2) : '0.00';
-        html += '<div class="goal-row"><span>' + hg.label + '</span><span>' + hg.getValue(stats).toFixed(2) + '</span></div>' +
-          '<div class="reward-line">Reward: +' + hg.reward + ' heat &middot; Class best: ' + classBest + '</div>';
+      if (hiddenQuestsEnabled) {
+        html += '<div class="panel-label" style="margin-top:18px;">Your hidden quest</div>';
+        if (hg) {
+          const classBest = myQuestClassRecord ? myQuestClassRecord.value.toFixed(2) : '0.00';
+          html += '<div class="goal-row"><span>' + hg.label + '</span><span>' + hg.getValue(stats).toFixed(2) + '</span></div>' +
+            '<div class="reward-line">Reward: +' + computeReward(hg.rewardProportion, currentStartingHeat) + ' heat &middot; Class best: ' + classBest + '</div>';
+        }
       }
       document.getElementById('goalsContent').innerHTML = html;
     }
@@ -492,7 +557,10 @@
       const letters = Object.keys(inventory).filter((l) => (inventory[l] || 0) > 0).sort();
       el.innerHTML = letters.length === 0
         ? '<p class="hint">Empty -- buy some reactants below.</p>'
-        : letters.map((l) => '<div class="inventory-row"><span>' + l + '</span><span>' + inventory[l].toFixed(2) + ' mol</span></div>').join('');
+        : letters.map((l) => {
+            const displayAmount = massModeEnabled ? molesToGrams(l, inventory[l]) : inventory[l];
+            return '<div class="inventory-row"><span>' + l + '</span><span>' + displayAmount.toFixed(2) + (massModeEnabled ? ' g' : ' mol') + '</span></div>';
+          }).join('');
     }
 
     function renderBuyPanel() {
@@ -505,14 +573,15 @@
         el.innerHTML = '<p class="hint">Nothing to buy yet -- ask your teacher to unlock a reaction.</p>';
         return;
       }
-      el.innerHTML = letters.map((l) =>
-        '<div class="trade-row">' +
+      el.innerHTML = letters.map((l) => {
+        const priceDisplay = massModeEnabled ? (buyPrice(l) / MOLAR_MASS[l]).toFixed(2) + ' heat/g' : buyPrice(l).toFixed(2) + ' heat/mol';
+        return '<div class="trade-row">' +
         '<span class="trade-letter">' + l + '</span>' +
-        '<span class="trade-price">' + buyPrice(l).toFixed(2) + ' heat/mol</span>' +
+        '<span class="trade-price">' + priceDisplay + '</span>' +
         '<input type="number" min="0" step="0.01" value="1" id="buyQty_' + l + '" ' + (paused ? 'disabled' : '') + '>' +
         '<button data-letter="' + l + '" class="buy-btn" ' + (paused ? 'disabled' : '') + '>Buy</button>' +
-        '</div>'
-      ).join('') + '<div class="error-msg" id="buyError"></div>';
+        '</div>';
+      }).join('') + '<div class="error-msg" id="buyError"></div>';
       el.querySelectorAll('.buy-btn').forEach((btn) => {
         btn.addEventListener('click', () => buyLetter(btn.dataset.letter));
       });
@@ -525,14 +594,16 @@
         el.innerHTML = '<p class="hint">Nothing to sell yet.</p>';
         return;
       }
-      el.innerHTML = letters.map((l) =>
-        '<div class="trade-row">' +
+      el.innerHTML = letters.map((l) => {
+        const haveDisplay = massModeEnabled ? molesToGrams(l, inventory[l]) : inventory[l];
+        const priceDisplay = massModeEnabled ? pricePerGram(l).toFixed(2) + ' heat/g' : PRICES[l] + ' heat/mol';
+        return '<div class="trade-row">' +
         '<span class="trade-letter">' + l + '</span>' +
-        '<span class="trade-price">' + PRICES[l] + ' heat/mol (have ' + inventory[l].toFixed(2) + ')</span>' +
-        '<input type="number" min="0" max="' + inventory[l] + '" step="0.01" value="' + inventory[l].toFixed(2) + '" id="sellQty_' + l + '" ' + (paused ? 'disabled' : '') + '>' +
+        '<span class="trade-price">' + priceDisplay + ' (have ' + haveDisplay.toFixed(2) + (massModeEnabled ? ' g' : ' mol') + ')</span>' +
+        '<input type="number" min="0" max="' + haveDisplay + '" step="0.01" value="' + haveDisplay.toFixed(2) + '" id="sellQty_' + l + '" ' + (paused ? 'disabled' : '') + '>' +
         '<button data-letter="' + l + '" class="buy-btn" ' + (paused ? 'disabled' : '') + '>Sell</button>' +
-        '</div>'
-      ).join('') + '<div class="error-msg" id="sellError"></div>';
+        '</div>';
+      }).join('') + '<div class="error-msg" id="sellError"></div>';
       el.querySelectorAll('.buy-btn').forEach((btn) => {
         btn.addEventListener('click', () => sellLetter(btn.dataset.letter));
       });
@@ -541,39 +612,46 @@
     async function buyLetter(letter) {
       const errEl = document.getElementById('buyError');
       if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
-      const qty = Math.max(0, parseFloat(document.getElementById('buyQty_' + letter).value) || 0);
-      if (qty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
-      const cost = qty * buyPrice(letter);
+      const typedQty = Math.max(0, parseFloat(document.getElementById('buyQty_' + letter).value) || 0);
+      if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+      const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
+      const cost = qtyMoles * buyPrice(letter);
       if (cost > currentHeat) { errEl.textContent = 'Not enough heat for that.'; return; }
       errEl.textContent = '';
+      const newAmount = (inventory[letter] || 0) + qtyMoles;
       await update(ref(db, 'students/' + studentKey), {
         heat: currentHeat - cost,
-        ['inventory/' + letter]: (inventory[letter] || 0) + qty
+        ['inventory/' + letter]: newAmount
       });
+      await maybeBumpHolding(letter, newAmount);
     }
 
     async function sellLetter(letter) {
       const errEl = document.getElementById('sellError');
       if (paused) { errEl.textContent = 'Your teacher paused the game.'; return; }
       const have = inventory[letter] || 0;
-      const qty = Math.max(0, parseFloat(document.getElementById('sellQty_' + letter).value) || 0);
-      if (qty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
-      if (qty > have) { errEl.textContent = "You don't have that much " + letter + '.'; return; }
+      const haveDisplay = massModeEnabled ? molesToGrams(letter, have) : have;
+      const typedQty = Math.max(0, parseFloat(document.getElementById('sellQty_' + letter).value) || 0);
+      if (typedQty <= 0) { errEl.textContent = 'Enter an amount greater than 0.'; return; }
+      if (typedQty > haveDisplay) { errEl.textContent = "You don't have that much " + letter + '.'; return; }
       errEl.textContent = '';
-      const revenue = qty * PRICES[letter];
+      const qtyMoles = massModeEnabled ? gramsToMoles(letter, typedQty) : typedQty;
+      const revenue = qtyMoles * PRICES[letter];
       const newTotalSoldRevenue = (stats.totalSoldRevenue || 0) + revenue;
+      const newAmount = have - qtyMoles;
       await update(ref(db, 'students/' + studentKey), {
         heat: currentHeat + revenue,
-        ['inventory/' + letter]: have - qty,
+        ['inventory/' + letter]: newAmount,
         totalSoldRevenue: newTotalSoldRevenue
       });
+      await maybeBumpHolding(letter, newAmount);
       await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
     }
 
     async function openConfirmScreen(reactionId) {
       pendingReactionId = reactionId;
       const reaction = REACTIONS.find((r) => r.id === reactionId);
-      pendingQuestionType = bonusEnabled ? pickBonusQuestionType(reaction) : null;
+      pendingBonusQuestion = bonusEnabled ? pickBonusQuestionType(reaction) : null;
 
       if (yieldFluctuationEnabled) {
         const snap = await get(ref(db, 'market/pressures/' + reactionId));
@@ -597,29 +675,39 @@
         yieldEl.style.display = 'none';
       }
       document.getElementById('commitError').textContent = '';
+
+      const molarMassEl = document.getElementById('confirmMolarMass');
+      if (massModeEnabled) {
+        const allLetters = reaction.reactants.map((r) => r.letter).concat(reaction.products.map((p) => p.letter));
+        molarMassEl.style.display = 'block';
+        molarMassEl.textContent = 'Molar mass: ' + allLetters.map((l) => l + ' = ' + MOLAR_MASS[l].toFixed(2) + ' g/mol').join(', ');
+      } else {
+        molarMassEl.style.display = 'none';
+      }
+
       document.getElementById('commitInputs').innerHTML = reaction.reactants.map((r) => {
         const have = inventory[r.letter] || 0;
-        return '<div class="form-row"><label>Commit moles of ' + r.letter + ' (you have ' + have.toFixed(2) + ' -- the rest stays in inventory)</label>' +
-          '<input type="number" min="0" max="' + have + '" step="0.01" value="' + have.toFixed(2) + '" id="commit_' + r.letter + '"></div>';
+        const haveDisplay = massModeEnabled ? molesToGrams(r.letter, have) : have;
+        const unitLabel = massModeEnabled ? 'grams' : 'moles';
+        const unitSuffix = massModeEnabled ? ' g' : '';
+        return '<div class="form-row"><label>Commit ' + unitLabel + ' of ' + r.letter + ' (you have ' + haveDisplay.toFixed(2) + unitSuffix + ' -- the rest stays in inventory)</label>' +
+          '<input type="number" min="0" max="' + haveDisplay + '" step="0.01" value="' + haveDisplay.toFixed(2) + '" id="commit_' + r.letter + '"></div>';
       }).join('');
 
       const bonusBoxEl = document.getElementById('bonusBox');
-      if (!pendingQuestionType) {
+      if (!pendingBonusQuestion) {
         bonusBoxEl.style.display = 'none';
         return;
       }
       bonusBoxEl.style.display = 'block';
       const qBox = document.getElementById('bonusQuestionBox');
-      if (pendingQuestionType === 'limiting') {
+      const q = pendingBonusQuestion;
+      if (q.kind === 'limiting') {
         qBox.innerHTML = '<label>Which reactant will be limiting?</label><select id="bonusAnswerInput2">' +
           '<option value="" selected>Skip</option>' +
           reaction.reactants.map((r) => '<option value="' + r.letter + '">' + r.letter + '</option>').join('') + '</select>';
-      } else if (pendingQuestionType.indexOf('formed_') === 0) {
-        const letter = pendingQuestionType.slice('formed_'.length);
-        qBox.innerHTML = '<label>Moles of ' + letter + ' that will form?</label><input type="number" step="any" id="bonusAnswerInput" placeholder="Leave blank to skip">';
       } else {
-        const letter = pendingQuestionType.slice('consumed_'.length);
-        qBox.innerHTML = '<label>Moles of ' + letter + ' that will be consumed?</label><input type="number" step="any" id="bonusAnswerInput" placeholder="Leave blank to skip">';
+        qBox.innerHTML = '<label>' + bonusQuestionLabel(q) + '</label><input type="number" step="any" id="bonusAnswerInput" placeholder="Leave blank to skip">';
       }
     }
 
@@ -627,27 +715,43 @@
       const committed = {};
       reaction.reactants.forEach((r) => {
         const have = inventory[r.letter] || 0;
+        const haveDisplay = massModeEnabled ? molesToGrams(r.letter, have) : have;
         const val = Math.max(0, parseFloat(document.getElementById('commit_' + r.letter).value) || 0);
-        committed[r.letter] = Math.min(val, have);
+        const clampedDisplay = Math.min(val, haveDisplay);
+        committed[r.letter] = massModeEnabled ? gramsToMoles(r.letter, clampedDisplay) : clampedDisplay;
       });
       return committed;
     }
 
-    function gradeBonusAnswer(result) {
-      if (!pendingQuestionType) return null;
-      if (pendingQuestionType === 'limiting') {
+    function gradeBonusAnswer(result, reaction) {
+      if (!pendingBonusQuestion) return null;
+      const q = pendingBonusQuestion;
+      if (q.kind === 'limiting') {
         const sel = document.getElementById('bonusAnswerInput2').value;
         return sel ? (sel === result.limitingLetter) : null;
       }
       const raw = document.getElementById('bonusAnswerInput').value;
       if (raw === '') return null;
       const val = parseFloat(raw);
-      if (pendingQuestionType.indexOf('formed_') === 0) {
-        const letter = pendingQuestionType.slice('formed_'.length);
-        return withinTolerance(val, result.formed[letter]);
+
+      let expectedMoles;
+      if (q.kind === 'formed') {
+        if (q.yieldType === 'theoretical') {
+          const coeff = reaction.products.find((p) => p.letter === q.letter).coeff;
+          expectedMoles = result.theoreticalExtent * coeff;
+        } else {
+          expectedMoles = result.formed[q.letter];
+        }
+      } else { // consumed
+        if (q.yieldType === 'theoretical') {
+          const coeff = reaction.reactants.find((r) => r.letter === q.letter).coeff;
+          expectedMoles = result.theoreticalExtent * coeff;
+        } else {
+          expectedMoles = result.consumed[q.letter];
+        }
       }
-      const letter = pendingQuestionType.slice('consumed_'.length);
-      return withinTolerance(val, result.consumed[letter]);
+      const expected = q.unitType === 'mass' ? molesToGrams(q.letter, expectedMoles) : expectedMoles;
+      return withinTolerance(val, expected);
     }
 
     document.getElementById('runConfirmBtn').addEventListener('click', async () => {
@@ -664,13 +768,61 @@
       }
 
       const result = solveReaction(reaction, committed, pendingPercentYield);
-      const heatEarned = result.extent * reaction.heatPerExtent;
+
+      // Fluctuation OFF has no diminishing return for repeating the same
+      // reaction, unlike fluctuation ON (which already handles this via
+      // pressure/yield). Without SOME counter, a student can spam one
+      // cheap decomposition (Reaction 1.1 or 1.5 -- buy 1 reactant, run,
+      // repeat) indefinitely and out-earn genuinely varied, skilled play,
+      // since every cycle above breakeven is pure profit with no cost to
+      // repeating it.
+      //
+      // This checks the last 5 reactions run (a sliding FIFO window, not
+      // a permanent counter) -- if the current reaction shows up 4+ times
+      // in that window, it drops to the breakeven-equivalent rate for
+      // this run. Diversifying "ages out" old repeats naturally, so
+      // nothing is permanently capped.
+      //
+      // Window=5, threshold=4 was chosen deliberately, not just as round
+      // numbers: with N different reactions rotating evenly through a
+      // window of 5, the most any one of them can reach is ceil(5/N).
+      // For N=1 (pure spam) that's 5, which trips the threshold -- for
+      // N=2 or more it's at most 3, which never does. That means ANY
+      // rotation between two or more reactions is naturally exempt,
+      // including the shortest path to Y (Reaction 1.4 -> 2.7 -> 3.1)
+      // and most hidden-quest grinding, without needing to special-case
+      // which reactions qualify -- it falls out of the math. Verified
+      // directly: pure single-reaction spam is still fully capped,
+      // 2-reaction and 3-reaction rotation (including the exact Y-chase
+      // pattern) stay at full rate throughout, and so does an uneven 2:1
+      // rotation.
+      const RECENT_WINDOW_SIZE = 5;
+      const REPEAT_THRESHOLD = 4;
+      const BREAKEVEN_BONUS_RATIO = 0.10 / 0.15; // matches bonusPerExtent's pre-profit-margin rate
+      function effectiveBonusPerExtent() {
+        if (yieldFluctuationEnabled) return reaction.bonusPerExtent;
+        const recent = stats.recentReactionIds || [];
+        const countInWindow = recent.filter((id) => id === reaction.id).length;
+        return countInWindow < REPEAT_THRESHOLD ? reaction.bonusPerExtent : reaction.bonusPerExtent * BREAKEVEN_BONUS_RATIO;
+      }
+      const effBonusPerExtent = effectiveBonusPerExtent();
+
+      // With the bonus question OFF, there's no separate question to earn
+      // the extra portion through, so it's granted automatically --
+      // otherwise turning bonus off would silently cap every run at 90%
+      // cost recovery even when played perfectly, which was never the intent.
+      const heatEarned = bonusEnabled
+        ? result.extent * reaction.heatPerExtent
+        : result.extent * (reaction.heatPerExtent + effBonusPerExtent);
 
       const newInventory = Object.assign({}, inventory);
       let wastedThisRun = 0;
+      const wastedByLetter = {};
       reaction.reactants.forEach((r) => {
         newInventory[r.letter] = (newInventory[r.letter] || 0) - committed[r.letter];
-        wastedThisRun += committed[r.letter] - result.consumed[r.letter];
+        const w = committed[r.letter] - result.consumed[r.letter];
+        wastedThisRun += w;
+        wastedByLetter[r.letter] = w;
       });
       let thisRunMax = 0;
       const newProducedBySpecies = Object.assign({}, stats.totalProducedBySpecies || {});
@@ -680,19 +832,35 @@
         if (result.formed[p.letter] > thisRunMax) thisRunMax = result.formed[p.letter];
       });
 
-      const isCorrect = gradeBonusAnswer(result);
-      const bonus = isCorrect === true ? result.extent * reaction.bonusPerExtent : 0;
+      const isCorrect = gradeBonusAnswer(result, reaction);
+      const bonus = isCorrect === true ? result.extent * effBonusPerExtent : 0;
 
-      const productSummary = reaction.products.map((p) => result.formed[p.letter].toFixed(2) + ' mol ' + p.letter).join(', ');
+      // Each product/reactant is converted individually here -- never a
+      // combined multi-substance total, since different letters have
+      // different molar masses and summing first then converting would
+      // silently misrepresent the actual mass.
+      const unitSuffix = massModeEnabled ? ' g ' : ' mol ';
+      const productSummary = reaction.products.map((p) => {
+        const amt = massModeEnabled ? molesToGrams(p.letter, result.formed[p.letter]) : result.formed[p.letter];
+        return amt.toFixed(2) + unitSuffix + p.letter;
+      }).join(', ');
       let flash = 'Ran ' + reaction.name + ': +' + heatEarned.toFixed(2) + ' heat, ' + productSummary + ' produced.';
       if (isCorrect === true) flash += ' Bonus correct: +' + bonus.toFixed(2) + ' heat.';
       else if (isCorrect === false) flash += ' Bonus answer was off -- no extra heat.';
-      if (wastedThisRun > 0.0001) flash += ' ' + wastedThisRun.toFixed(2) + ' mol wasted.';
+      const wasteSummary = Object.keys(wastedByLetter)
+        .filter((l) => wastedByLetter[l] > 0.0001)
+        .map((l) => {
+          const amt = massModeEnabled ? molesToGrams(l, wastedByLetter[l]) : wastedByLetter[l];
+          return amt.toFixed(2) + unitSuffix + l;
+        }).join(', ');
+      if (wasteSummary) flash += ' ' + wasteSummary + ' wasted.';
       lastFlash = flash;
 
       const newTotalWasted = currentWasted + wastedThisRun;
       const newBestSingleRunYield = Math.max(stats.bestSingleRunYield || 0, thisRunMax);
       const newBonusCorrectCount = (stats.bonusCorrectCount || 0) + (isCorrect === true ? 1 : 0);
+      const newRecentReactionIds = (stats.recentReactionIds || []).concat([reaction.id]);
+      if (newRecentReactionIds.length > RECENT_WINDOW_SIZE) newRecentReactionIds.shift();
 
       await update(ref(db, 'students/' + studentKey), {
         heat: currentHeat + heatEarned + bonus,
@@ -700,7 +868,8 @@
         totalWasted: newTotalWasted,
         totalProducedBySpecies: newProducedBySpecies,
         bestSingleRunYield: newBestSingleRunYield,
-        bonusCorrectCount: newBonusCorrectCount
+        bonusCorrectCount: newBonusCorrectCount,
+        recentReactionIds: newRecentReactionIds
       });
 
       // Class-wide records: every species produced gets tracked
@@ -709,7 +878,13 @@
       const recordUpdates = [];
       reaction.products.forEach((p) => {
         recordUpdates.push(bumpSingleRecord('species_' + p.letter, newProducedBySpecies[p.letter]));
+        recordUpdates.push(maybeBumpHolding(p.letter, newInventory[p.letter]));
       });
+      reaction.reactants.forEach((r) => {
+        recordUpdates.push(maybeBumpHolding(r.letter, newInventory[r.letter]));
+      });
+      const newDiversityCount = Object.keys(newProducedBySpecies).filter((l) => (newProducedBySpecies[l] || 0) > 0).length;
+      recordUpdates.push(bumpSingleRecord('diverseProducer', newDiversityCount));
       if (newProducedBySpecies[COMMON_GOAL_SPECIES] !== undefined) {
         recordUpdates.push(bumpTop3('commonGoal_mostProduced', newProducedBySpecies[COMMON_GOAL_SPECIES], 'max'));
       }
@@ -733,7 +908,7 @@
 
     function closeConfirmScreen() {
       pendingReactionId = null;
-      pendingQuestionType = null;
+      pendingBonusQuestion = null;
       updateTopLevelScreen();
     }
 

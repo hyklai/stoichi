@@ -35,5 +35,5 @@ export function solveReaction(reaction, committed, percentYield = 100) {
     consumed[r.letter] = extent * r.coeff;
   });
 
-  return { limitingLetter, formed, consumed, extent };
+  return { limitingLetter, formed, consumed, extent, theoreticalExtent };
 }

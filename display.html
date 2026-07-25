@@ -183,7 +183,7 @@
     import { db, auth } from './firebase-config.js';
     import { ref, onValue, runTransaction } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js';
     import { signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js';
-    import { COMMON_GOALS } from './goals.js';
+    import { COMMON_GOALS, computeReward } from './goals.js';
     import { REACTIONS } from './reactions.js';
     import { computeBoundaryTransition, liveRemainingSeconds, tierOf, yieldFromPressure, safePressure, BASE_YIELD, DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES } from './market.js';
 
@@ -192,6 +192,8 @@
     let connected = false;
     let latestTimer = null;
     let yieldFluctuationEnabled = false;
+    const DEFAULT_STARTING_HEAT = 2000;
+    let currentStartingHeat = DEFAULT_STARTING_HEAT;
     let marketParams = { runPressureIncrement: DEFAULT_RUN_PRESSURE_INCREMENT, decayPerMinute: DEFAULT_PRESSURE_DECAY_PER_MINUTE, intervalMinutes: DEFAULT_INTERVAL_MINUTES, tierMultipliers: DEFAULT_TIER_MULTIPLIERS };
 
     function nameFor(key) {
@@ -211,6 +213,7 @@
       }
     });
     onValue(ref(db, 'settings/yieldFluctuationEnabled'), (s) => { yieldFluctuationEnabled = s.val() === true; renderCountdown(); });
+    onValue(ref(db, 'settings/startingHeat'), (s) => { currentStartingHeat = s.val() ?? DEFAULT_STARTING_HEAT; renderBoard(); });
     onValue(ref(db, 'settings/marketParams'), (s) => { if (s.val()) marketParams = s.val(); });
 
     function formatCountdown(seconds) {
@@ -261,9 +264,9 @@
         const rec = classRecords['commonGoal_' + g.id];
         const top = (rec && rec.top) || [];
         const places = [
-          { rank: 1, cls: 'rank-1', reward: g.rewards.first },
-          { rank: 2, cls: 'rank-2', reward: g.rewards.second },
-          { rank: 3, cls: 'rank-3', reward: g.rewards.third }
+          { rank: 1, cls: 'rank-1', reward: computeReward(g.rewardProportions.first, currentStartingHeat) },
+          { rank: 2, cls: 'rank-2', reward: computeReward(g.rewardProportions.second, currentStartingHeat) },
+          { rank: 3, cls: 'rank-3', reward: computeReward(g.rewardProportions.third, currentStartingHeat) }
         ];
         const rows = places.map((p, i) => {
           const entry = top[i];
