@@ -266,6 +266,68 @@
       <div id="recordsContent"></div>
     </div>
   </div>
+
+  <div class="tab-panel" data-panel="help" style="display:none;">
+    <div class="section">
+      <div class="section-label">Common goals: ties and payout</div>
+      <details>
+        <summary>Two students tie for the highest score on a common goal (Most Y, Least Wasted, Biggest Run) -- who gets 1st place?</summary>
+        <p class="toggle-note">Whoever reached that value FIRST keeps the higher rank. Ties are broken by order of achievement, not split -- if Alice hits 40 produced before Bob also reaches 40, Alice stays 1st and Bob takes 2nd (or 3rd, or misses the podium, depending on who else is ranked). This is different from hidden quests below.</p>
+      </details>
+      <details>
+        <summary>What if 4+ students are all above the 3rd-place cutoff?</summary>
+        <p class="toggle-note">Only the top 3 are ever tracked or paid for a common goal -- 4th place and below get nothing for that specific goal, regardless of how close they were.</p>
+      </details>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Hidden quests: ties and payout</div>
+      <details open>
+        <summary>Two or more students tie for the highest amount on a hidden quest -- is the reward split between them?</summary>
+        <p class="toggle-note">No -- every tied student gets the FULL reward amount, each. If 3 students all hold the class record for "Most X currently held," and the reward is 260 heat, all 3 receive 260 heat, not 260 split three ways. Hidden quests reward reaching the record, not being the sole record-holder.</p>
+      </details>
+      <details>
+        <summary>Do you need to have picked a hidden quest to get paid for it?</summary>
+        <p class="toggle-note">Yes -- both things have to be true: you're the current class-record holder for that quest AND you specifically picked it as your hidden goal. Holding the record for something you never chose pays nothing; picking a quest you never end up leading also pays nothing.</p>
+      </details>
+      <details>
+        <summary>A student was leading a hidden quest, then someone else overtook them -- do they lose credit entirely?</summary>
+        <p class="toggle-note">Yes, for that quest specifically -- only the CURRENT record holder(s) at the moment you run End Session get paid. Past leaders who were later overtaken get nothing for it, even if they led for most of the session.</p>
+      </details>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Ending a session</div>
+      <details>
+        <summary>What exactly does "Pay out rewards" do?</summary>
+        <p class="toggle-note">Reads the current class records, pays 1st/2nd/3rd for each common goal, and pays every current record-holder for each hidden quest (per the picked-it-AND-holds-it rule above). It doesn't reset anything else -- students, the library, and the market all stay exactly as they are.</p>
+      </details>
+      <details>
+        <summary>Is it safe to click "Pay out rewards" more than once?</summary>
+        <p class="toggle-note">It won't double-pay anyone for the SAME leaderboard position, but if the standings have changed between clicks, it WILL pay out again for whoever is newly leading. Safe to use mid-session to check standings, but the intended use is once, at the actual end of the session.</p>
+      </details>
+      <details>
+        <summary>What does "Start New" reset, and what should I do it before?</summary>
+        <p class="toggle-note">Clears every student, the reaction library, and all class records, and resets the market to a fresh interval -- then returns you to session setup. This is for starting a new class period, not something to run mid-session.</p>
+      </details>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Pause, market, and Mass Mode</div>
+      <details>
+        <summary>What does pausing the game actually disable?</summary>
+        <p class="toggle-note">Just Run, Buy, and Sell for students. Unlocking reactions, gifting heat, and End Session all still work while paused.</p>
+      </details>
+      <details>
+        <summary>How does yield fluctuation actually work?</summary>
+        <p class="toggle-note">Running a reaction raises its "pressure," which lowers its yield for a while -- pressure recovers gradually between market updates. "Trigger market shock now" ends the current interval early (applying the normal pressure-based update) and additionally jolts 1-3 random reactions on top, so the market doesn't become a fully memorized, solved pattern over repeat play.</p>
+      </details>
+      <details>
+        <summary>In Mass Mode, are bonus questions always in grams?</summary>
+        <p class="toggle-note">No -- bonus questions still sometimes ask in moles even with Mass Mode on, specifically as a deliberate cross-unit check, so students can't get by on gram-only intuition. The question always states which unit it wants.</p>
+      </details>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -276,9 +338,6 @@
     import { REACTIONS, PRICES, equationString } from './reactions.js';
     import { COMMON_GOALS, HIDDEN_GOALS, computeReward } from './goals.js';
     import { DEFAULT_RUN_PRESSURE_INCREMENT, DEFAULT_PRESSURE_DECAY_PER_MINUTE, DEFAULT_TIER_MULTIPLIERS, DEFAULT_INTERVAL_MINUTES, computeBoundaryTransition, applyRandomShock, liveRemainingSeconds } from './market.js';
-
-    // Must match the email in your Firebase security rules exactly.
-    const TEACHER_EMAIL = 'hylai1992@gmail.com';
 
     document.getElementById('loginBtn').addEventListener('click', async () => {
       const email = document.getElementById('loginEmail').value.trim();
@@ -297,7 +356,7 @@
 
     let initialized = false;
     onAuthStateChanged(auth, (user) => {
-      if (user && user.email === TEACHER_EMAIL) {
+      if (user && !user.isAnonymous) {
         document.getElementById('loginScreen').style.display = 'none';
         if (!initialized) {
           initialized = true;
@@ -341,11 +400,13 @@
       { label: 'Main', panels: ['main'] },
       { label: 'Library', panels: ['library'] },
       { label: 'Students', panels: ['students'] },
-      { label: 'Records', panels: ['records'] }
+      { label: 'Records', panels: ['records'] },
+      { label: 'Help', panels: ['help'] }
     ];
     const TAB_GROUPS_WIDE = [
       { label: 'Main & Library', panels: ['main', 'library'] },
-      { label: 'Students & Records', panels: ['students', 'records'] }
+      { label: 'Students & Records', panels: ['students', 'records'] },
+      { label: 'Help', panels: ['help'] }
     ];
     const wideLayoutQuery = window.matchMedia('(min-width: 860px)');
     function isWideLayout() { return wideLayoutQuery.matches; }

@@ -105,6 +105,7 @@
     <div class="status">Enter your name to join this session</div>
     <input type="text" id="nameInput" placeholder="Your name" maxlength="30">
     <button id="joinBtn">Join game</button>
+    <div class="error-msg" id="joinError"></div>
   </div>
 
   <div id="gameView" style="display:none;">
@@ -124,6 +125,7 @@
       <div class="panel-label">Choose your hidden quest</div>
       <p class="hint" style="margin-top:0;">Pick one before you start buying. Only you can see which quest you chose -- other students and the class display never see it.</p>
       <div id="questOptions"></div>
+      <div class="error-msg" id="questSelectError"></div>
     </div>
 
     <div id="mainScreen" style="display:none;">
@@ -132,6 +134,7 @@
       <div class="tab-panel panel" data-panel="library">
         <div class="panel-label">Reaction library</div>
         <div id="libraryPanel"></div>
+        <div class="error-msg" id="libraryError"></div>
       </div>
       <div class="tab-panel panel" data-panel="inventory" style="display:none;">
         <div class="panel-label">Inventory</div>
@@ -303,6 +306,7 @@
     let myQuestRecordListenerSet = false;
     let offeredQuests = [];
     let pendingReactionId = null;
+    let openingConfirmScreen = false;
     let pendingBonusQuestion = null;
     let lastFlash = '';
     let stats = {};
@@ -479,12 +483,26 @@
         '<button data-id="' + q.id + '" class="quest-choose-btn">Choose this quest</button></div>'
       ).join('');
       el.querySelectorAll('.quest-choose-btn').forEach((btn) => {
-        btn.addEventListener('click', () => chooseQuest(btn.dataset.id));
+        btn.addEventListener('click', () => chooseQuest(btn.dataset.id, btn));
       });
     }
 
-    async function chooseQuest(questId) {
-      await update(ref(db, 'students/' + studentKey), { hiddenGoalId: questId });
+    async function chooseQuest(questId, btn) {
+      const errEl = document.getElementById('questSelectError');
+      if (btn.disabled) return;
+      document.querySelectorAll('.quest-choose-btn').forEach((b) => { b.disabled = true; });
+      errEl.textContent = '';
+      try {
+        await update(ref(db, 'students/' + studentKey), { hiddenGoalId: questId });
+      } catch (err) {
+        console.error(err);
+        if (err.code === 'PERMISSION_DENIED') {
+          errEl.textContent = 'Your session lost its connection to your saved name. Try refreshing the page -- if that doesn\'t help, rejoin with a slightly different name (like adding an initial).';
+        } else {
+          errEl.textContent = 'Could not save your quest choice -- check your connection and try again.';
+        }
+        document.querySelectorAll('.quest-choose-btn').forEach((b) => { b.disabled = false; });
+      }
     }
 
     // --- Tabs ---
@@ -627,7 +645,7 @@
           reactions.map(libraryRowHtml).join('') + '</details>';
       }).join('');
       el.querySelectorAll('.run-btn').forEach((btn) => {
-        btn.addEventListener('click', () => openConfirmScreen(btn.dataset.id));
+        btn.addEventListener('click', () => { if (!openingConfirmScreen) openConfirmScreen(btn.dataset.id); });
       });
     }
 
@@ -706,6 +724,9 @@
           ['inventory/' + letter]: newAmount
         });
         await maybeBumpHolding(letter, newAmount);
+      } catch (err) {
+        console.error(err);
+        errEl.textContent = 'Could not complete that purchase -- check your connection and try again.';
       } finally {
         btn.disabled = false;
       }
@@ -734,26 +755,41 @@
         });
         await maybeBumpHolding(letter, newAmount);
         await bumpSingleRecord('bigSeller', newTotalSoldRevenue);
+      } catch (err) {
+        console.error(err);
+        errEl.textContent = 'Could not complete that sale -- check your connection and try again.';
       } finally {
         btn.disabled = false;
       }
     }
 
     async function openConfirmScreen(reactionId) {
-      pendingReactionId = reactionId;
-      const reaction = REACTIONS.find((r) => r.id === reactionId);
-      pendingBonusQuestion = bonusEnabled ? pickBonusQuestionType(reaction) : null;
+      const errEl = document.getElementById('libraryError');
+      errEl.textContent = '';
+      openingConfirmScreen = true;
+      try {
+        pendingReactionId = reactionId;
+        const reaction = REACTIONS.find((r) => r.id === reactionId);
+        pendingBonusQuestion = bonusEnabled ? pickBonusQuestionType(reaction) : null;
 
-      if (yieldFluctuationEnabled) {
-        const snap = await get(ref(db, 'market/pressures/' + reactionId));
-        const stored = snap.val();
-        pendingPercentYield = yieldFromPressure((stored && stored.pressure) || 0);
-      } else {
-        pendingPercentYield = 100;
+        if (yieldFluctuationEnabled) {
+          const snap = await get(ref(db, 'market/pressures/' + reactionId));
+          const stored = snap.val();
+          pendingPercentYield = yieldFromPressure((stored && stored.pressure) || 0);
+        } else {
+          pendingPercentYield = 100;
+        }
+
+        updateTopLevelScreen();
+        renderConfirmScreen(reaction);
+      } catch (err) {
+        console.error(err);
+        pendingReactionId = null;
+        pendingBonusQuestion = null;
+        errEl.textContent = 'Could not open that reaction -- check your connection and try again.';
+      } finally {
+        openingConfirmScreen = false;
       }
-
-      updateTopLevelScreen();
-      renderConfirmScreen(reaction);
     }
 
     function renderConfirmScreen(reaction) {
@@ -995,6 +1031,9 @@
       }
 
       closeConfirmScreen();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('commitError').textContent = 'Could not complete that run -- check your connection and try again.';
       } finally {
         runBtn.disabled = false;
       }
@@ -1019,15 +1058,35 @@
     document.getElementById('joinBtn').addEventListener('click', async () => {
       const name = document.getElementById('nameInput').value.trim();
       if (!name) return;
-      await ensureSignedIn();
-      joinAsStudent(name);
+      const btn = document.getElementById('joinBtn');
+      const errEl = document.getElementById('joinError');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      errEl.textContent = '';
+      try {
+        await ensureSignedIn();
+        await joinAsStudent(name);
+      } catch (err) {
+        errEl.textContent = 'Could not join -- check your connection and try again.';
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     (async () => {
       const savedName = localStorage.getItem('stoichiName');
       if (savedName) {
-        await ensureSignedIn();
-        joinAsStudent(savedName);
+        try {
+          await ensureSignedIn();
+          await joinAsStudent(savedName);
+        } catch (err) {
+          // Silent here on purpose -- this is the automatic rejoin-on-reload
+          // path with no button click to attach a message to. Falling through
+          // just leaves the join form showing, where the person can type
+          // their name and hit Join themselves, which DOES surface an error.
+          console.error(err);
+        }
       }
     })();
   </script>
